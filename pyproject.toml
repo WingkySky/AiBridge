@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "agn-sdk"
-version = "1.1.0"
+version = "1.1.1"
 description = "多模型统一接口 SDK - 一套 API 调用所有 AI 模型"
 readme = "README.md"
 license = {text = "MIT"}

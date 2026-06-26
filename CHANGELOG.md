@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-06-26
+
+### Fixed
+
+- EdgeTTSAdapter 空音频检测：edge-tts 服务端未返回音频时不再静默返回空 `SpeechResult`，改为抛出 `APIError`（code=`NO_AUDIO_RECEIVED`），调用方可直接捕获异常而非靠文件大小事后发现
+
 ## [1.1.0] - 2026-06-26
 
 ### Added

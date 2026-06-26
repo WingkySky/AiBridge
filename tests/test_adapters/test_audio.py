@@ -2695,6 +2695,30 @@ class TestEdgeTTSAdapter:
         assert call_kwargs["voice"] == "zh-CN-YunxiNeural"
 
     @pytest.mark.asyncio
+    async def test_speech_empty_audio_raises_error(self):
+        """测试 edge-tts 返回空音频时抛出 APIError，而非静默返回空结果"""
+        from agn.core.errors import APIError
+
+        mock_edge_tts = MagicMock()
+        mock_communicate = MagicMock()
+
+        # 模拟服务端未返回音频（只有 WordBoundary 元数据，无 audio chunk）
+        async def fake_stream_empty():
+            yield {"type": "WordBoundary", "offset": 100, "text": "hello"}
+
+        mock_communicate.stream = fake_stream_empty
+        mock_edge_tts.Communicate = MagicMock(return_value=mock_communicate)
+        self.adapter._edge_tts_module = mock_edge_tts
+
+        with pytest.raises(APIError) as exc_info:
+            await self.adapter.speech("edge-tts", "测试文本", voice="xiaoxiao")
+
+        assert "空音频" in str(exc_info.value)
+        assert exc_info.value.code == "NO_AUDIO_RECEIVED"
+        assert exc_info.value.details["provider"] == "edge-tts"
+        assert exc_info.value.details["voice"] == "zh-CN-XiaoxiaoNeural"
+
+    @pytest.mark.asyncio
     async def test_speech_wav_format(self):
         """测试 WAV 格式输出"""
         mock_edge_tts = MagicMock()

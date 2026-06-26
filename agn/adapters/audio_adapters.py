@@ -1922,6 +1922,19 @@ class EdgeTTSAdapter(BaseAdapter):
 
         audio_data = b"".join(audio_chunks)
 
+        # 空音频检测：edge-tts 服务端未返回音频时（参数错误/特殊字符/限流未抛异常等）
+        # 不应静默返回空结果，否则调用方只能靠文件大小事后发现
+        if not audio_data:
+            raise APIError(
+                message="Edge TTS 返回空音频，请检查文本参数、音色或网络状况",
+                code="NO_AUDIO_RECEIVED",
+                details={
+                    "provider": self.provider_type,
+                    "voice": voice_id,
+                    "text_length": len(input),
+                },
+            )
+
         fmt_ext = "mp3"
         of = kwargs.get("output_format", "mp3")
         if isinstance(of, str):
