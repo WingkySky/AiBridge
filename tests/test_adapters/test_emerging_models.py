@@ -18,7 +18,6 @@ from agn.adapters.emerging_models import (
 )
 from agn.models.common import ProviderConfig
 
-
 # ==================== Ideogram 测试 ====================
 
 
@@ -57,7 +56,9 @@ class TestIdeogramAdapter:
         from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
-            await adapter.chat(model="test", messages=[{"role": "user", "content": "hi"}])
+            await adapter.chat(
+                model="test", messages=[{"role": "user", "content": "hi"}]
+            )
 
     @pytest.mark.asyncio
     async def test_video_not_supported(self, adapter: IdeogramAdapter) -> None:
@@ -134,7 +135,9 @@ class TestIdeogramImageGenerate:
         """测试默认模型使用 V_2A_TURBO"""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"url": "https://example.com/img.png"}]}
+        mock_response.json.return_value = {
+            "data": [{"url": "https://example.com/img.png"}]
+        }
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
@@ -150,7 +153,10 @@ class TestIdeogramImageGenerate:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "data": [{"url": "https://example.com/1.png"}, {"url": "https://example.com/2.png"}]
+            "data": [
+                {"url": "https://example.com/1.png"},
+                {"url": "https://example.com/2.png"},
+            ]
         }
 
         mock_client = AsyncMock()
@@ -179,16 +185,17 @@ class TestIdeogramImageGenerate:
         assert body["seed"] == 42
 
     @pytest.mark.asyncio
-    async def test_image_generate_base64_response(self, adapter: IdeogramAdapter) -> None:
+    async def test_image_generate_base64_response(
+        self, adapter: IdeogramAdapter
+    ) -> None:
         """测试返回 base64 格式图片"""
         import base64 as b64
+
         fake_b64 = b64.b64encode(b"fake_png_data").decode()
 
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"base64": fake_b64}]
-        }
+        mock_response.json.return_value = {"data": [{"base64": fake_b64}]}
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
@@ -201,6 +208,7 @@ class TestIdeogramImageGenerate:
     async def test_image_edit_remix(self, adapter: IdeogramAdapter) -> None:
         """测试 Remix 图生图"""
         import base64 as b64
+
         fake_img_b64 = b64.b64encode(b"fake_img").decode()
 
         mock_response = MagicMock()
@@ -311,7 +319,9 @@ class TestLumaAdapter:
         from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
-            await adapter.chat(model="test", messages=[{"role": "user", "content": "hi"}])
+            await adapter.chat(
+                model="test", messages=[{"role": "user", "content": "hi"}]
+            )
 
     @pytest.mark.asyncio
     async def test_image_not_supported(self, adapter: LumaAdapter) -> None:
@@ -424,7 +434,9 @@ class TestLumaVideoCreate:
         assert body["camera_motion"] == "zoom_in"
 
     @pytest.mark.asyncio
-    async def test_video_create_with_reference_image(self, adapter: LumaAdapter) -> None:
+    async def test_video_create_with_reference_image(
+        self, adapter: LumaAdapter
+    ) -> None:
         """测试图生视频（起始帧）"""
         mock_response = MagicMock()
         mock_response.status_code = 201
@@ -662,7 +674,10 @@ class TestLlamaChat:
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": "Hello! How can I help you?"},
+                    "message": {
+                        "role": "assistant",
+                        "content": "Hello! How can I help you?",
+                    },
                     "finish_reason": "stop",
                 }
             ],
@@ -697,7 +712,12 @@ class TestLlamaChat:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "id": "chatcmpl-1",
-            "choices": [{"message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hi"},
+                    "finish_reason": "stop",
+                }
+            ],
         }
 
         mock_client = AsyncMock()
@@ -732,20 +752,25 @@ class TestLlamaChat:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "id": "chatcmpl-tool",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [
-                        {
-                            "id": "call_1",
-                            "type": "function",
-                            "function": {"name": "get_weather", "arguments": '{"city":"Beijing"}'},
-                        }
-                    ],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "get_weather",
+                                    "arguments": '{"city":"Beijing"}',
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "usage": {"prompt_tokens": 15, "completion_tokens": 10, "total_tokens": 25},
         }
 
@@ -753,14 +778,19 @@ class TestLlamaChat:
         mock_client.post.return_value = mock_response
         adapter._http_client = mock_client
 
-        tools = [{
-            "type": "function",
-            "function": {
-                "name": "get_weather",
-                "description": "Get weather for a city",
-                "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
-            },
-        }]
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather for a city",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                    },
+                },
+            }
+        ]
 
         result = await adapter.chat(
             model="llama-4-maverick",
@@ -769,7 +799,9 @@ class TestLlamaChat:
         )
         assert result.choices[0].message.tool_calls is not None
         assert len(result.choices[0].message.tool_calls) == 1
-        assert result.choices[0].message.tool_calls[0]["function"]["name"] == "get_weather"
+        assert (
+            result.choices[0].message.tool_calls[0]["function"]["name"] == "get_weather"
+        )
 
     @pytest.mark.asyncio
     async def test_authentication_error(self, adapter: LlamaAdapter) -> None:
@@ -785,7 +817,9 @@ class TestLlamaChat:
         adapter._http_client = mock_client
 
         with pytest.raises(AuthenticationError):
-            await adapter.chat(model="llama-4-maverick", messages=[{"role": "user", "content": "hi"}])
+            await adapter.chat(
+                model="llama-4-maverick", messages=[{"role": "user", "content": "hi"}]
+            )
 
     @pytest.mark.asyncio
     async def test_rate_limit_error(self, adapter: LlamaAdapter) -> None:
@@ -801,7 +835,9 @@ class TestLlamaChat:
         adapter._http_client = mock_client
 
         with pytest.raises(RateLimitError):
-            await adapter.chat(model="llama-4-maverick", messages=[{"role": "user", "content": "hi"}])
+            await adapter.chat(
+                model="llama-4-maverick", messages=[{"role": "user", "content": "hi"}]
+            )
 
 
 class TestLlamaStream:
@@ -875,10 +911,16 @@ class TestRouterEmergingModelsMapping:
         from agn.router import Router
 
         ideogram_models = [
-            "V_2A", "V_2A_TURBO", "V_2", "V_1", "V_1_TURBO",
+            "V_2A",
+            "V_2A_TURBO",
+            "V_2",
+            "V_1",
+            "V_1_TURBO",
         ]
         for model in ideogram_models:
-            assert Router.MODEL_PROVIDER_MAP.get(model) == "ideogram", f"{model} should map to ideogram"
+            assert (
+                Router.MODEL_PROVIDER_MAP.get(model) == "ideogram"
+            ), f"{model} should map to ideogram"
 
     def test_router_has_luma_models(self) -> None:
         """测试路由表包含 Luma 模型"""
@@ -886,7 +928,9 @@ class TestRouterEmergingModelsMapping:
 
         luma_models = ["ray-2", "ray-2-flash", "dream-machine"]
         for model in luma_models:
-            assert Router.MODEL_PROVIDER_MAP.get(model) == "luma", f"{model} should map to luma"
+            assert (
+                Router.MODEL_PROVIDER_MAP.get(model) == "luma"
+            ), f"{model} should map to luma"
 
     def test_router_has_llama_models(self) -> None:
         """测试路由表包含 Llama 模型"""
@@ -901,7 +945,9 @@ class TestRouterEmergingModelsMapping:
             "llama-3.1-8b-instruct",
         ]
         for model in llama_models:
-            assert Router.MODEL_PROVIDER_MAP.get(model) == "llama", f"{model} should map to llama"
+            assert (
+                Router.MODEL_PROVIDER_MAP.get(model) == "llama"
+            ), f"{model} should map to llama"
 
     def test_adapter_factory_registration(self) -> None:
         """测试适配器工厂注册"""

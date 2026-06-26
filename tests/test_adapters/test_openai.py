@@ -137,7 +137,10 @@ class TestOpenAIAdapterChatMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             messages = [ChatMessage(**m) for m in sample_chat_messages]
             result = await adapter.chat(model="gpt-4o", messages=messages)
@@ -200,7 +203,10 @@ class TestOpenAIAdapterChatMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             messages = [ChatMessage(**m) for m in sample_chat_messages]
             result = await adapter.chat(
@@ -266,7 +272,10 @@ class TestOpenAIAdapterChatMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             messages = [ChatMessage(**m) for m in sample_chat_messages]
             result = await adapter.chat(model="gpt-4o", messages=messages, n=3)
@@ -321,7 +330,10 @@ class TestOpenAIAdapterImageGenerateMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             result = await adapter.image_generate(
                 model="dall-e-3", prompt=sample_image_prompt
@@ -364,7 +376,10 @@ class TestOpenAIAdapterImageGenerateMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             result = await adapter.image_generate(
                 model="dall-e-3",
@@ -403,7 +418,10 @@ class TestOpenAIAdapterImageGenerateMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             result = await adapter.image_generate(
                 model="dall-e-3",
@@ -466,7 +484,10 @@ class TestOpenAIAdapterEmbedMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             result = await adapter.embed(
                 model="text-embedding-3-small", input="Hello world"
@@ -513,7 +534,10 @@ class TestOpenAIAdapterEmbedMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             texts = ["Hello", "World", "Test"]
             result = await adapter.embed(model="text-embedding-3-small", input=texts)
@@ -557,7 +581,10 @@ class TestOpenAIAdapterEmbedMockHTTP:
         }
 
         with patch.object(
-            adapter._http_client, "post", new_callable=AsyncMock, return_value=mock_response
+            adapter._http_client,
+            "post",
+            new_callable=AsyncMock,
+            return_value=mock_response,
         ) as mock_post:
             result = await adapter.embed(
                 model="text-embedding-3-small",

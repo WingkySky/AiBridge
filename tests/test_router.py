@@ -54,7 +54,12 @@ class TestRouter:
         """测试带权重的 Provider 配置"""
         providers = [
             {**mock_provider_config, "weight": 3},
-            {**mock_provider_config, "provider_type": "openai", "api_key": "key2", "weight": 2},
+            {
+                **mock_provider_config,
+                "provider_type": "openai",
+                "api_key": "key2",
+                "weight": 2,
+            },
         ]
         router = Router(providers=providers, strategy="weighted")
         assert router._weights["agnes"] == 3
@@ -83,9 +88,24 @@ class TestRouterStrategy:
     def multi_provider_router(self, mock_provider_config: dict) -> Router:
         """创建多 Provider 路由器"""
         providers = [
-            {**mock_provider_config, "provider_type": "agnes", "api_key": "key1", "weight": 5},
-            {**mock_provider_config, "provider_type": "openai", "api_key": "key2", "weight": 3},
-            {**mock_provider_config, "provider_type": "qwen", "api_key": "key3", "weight": 2},
+            {
+                **mock_provider_config,
+                "provider_type": "agnes",
+                "api_key": "key1",
+                "weight": 5,
+            },
+            {
+                **mock_provider_config,
+                "provider_type": "openai",
+                "api_key": "key2",
+                "weight": 3,
+            },
+            {
+                **mock_provider_config,
+                "provider_type": "qwen",
+                "api_key": "key3",
+                "weight": 2,
+            },
         ]
         return Router(providers=providers, strategy="first")
 
@@ -264,7 +284,10 @@ class TestModelProviderMapping:
         assert Router.MODEL_PROVIDER_MAP.get("pika-2") == "pika"
 
         # Stability
-        assert Router.MODEL_PROVIDER_MAP.get("stable-diffusion-xl-1024-v1-1") == "stability"
+        assert (
+            Router.MODEL_PROVIDER_MAP.get("stable-diffusion-xl-1024-v1-1")
+            == "stability"
+        )
         assert Router.MODEL_PROVIDER_MAP.get("sdxl") == "stability"
 
         # Qwen
@@ -276,7 +299,9 @@ class TestModelProviderMapping:
         assert Router.MODEL_PROVIDER_MAP.get("glm-3-turbo") == "zhipu"
 
         # Anthropic
-        assert Router.MODEL_PROVIDER_MAP.get("claude-3-5-sonnet-20241022") == "anthropic"
+        assert (
+            Router.MODEL_PROVIDER_MAP.get("claude-3-5-sonnet-20241022") == "anthropic"
+        )
         assert Router.MODEL_PROVIDER_MAP.get("claude-3-opus-20240229") == "anthropic"
 
         # Gemini
@@ -355,17 +380,33 @@ class TestModelProviderMapping:
 
         # SiliconFlow
         assert Router.MODEL_PROVIDER_MAP.get("GLM-4.7") == "siliconflow"
-        assert Router.MODEL_PROVIDER_MAP.get("deepseek-ai/DeepSeek-V3.2") == "siliconflow"
+        assert (
+            Router.MODEL_PROVIDER_MAP.get("deepseek-ai/DeepSeek-V3.2") == "siliconflow"
+        )
 
         # Together AI
-        assert Router.MODEL_PROVIDER_MAP.get("meta-llama/Llama-3-70b-chat-hf") == "togetherai"
+        assert (
+            Router.MODEL_PROVIDER_MAP.get("meta-llama/Llama-3-70b-chat-hf")
+            == "togetherai"
+        )
 
         # Fireworks AI
-        assert Router.MODEL_PROVIDER_MAP.get("accounts/fireworks/models/llama-v3p1-405b-instruct") == "fireworksai"
+        assert (
+            Router.MODEL_PROVIDER_MAP.get(
+                "accounts/fireworks/models/llama-v3p1-405b-instruct"
+            )
+            == "fireworksai"
+        )
 
         # Cloudflare Workers AI
-        assert Router.MODEL_PROVIDER_MAP.get("@cf/meta/llama-3.1-8b-instruct") == "cloudflareai"
-        assert Router.MODEL_PROVIDER_MAP.get("@cf/mistral/mistral-7b-instruct-v0.2") == "cloudflareai"
+        assert (
+            Router.MODEL_PROVIDER_MAP.get("@cf/meta/llama-3.1-8b-instruct")
+            == "cloudflareai"
+        )
+        assert (
+            Router.MODEL_PROVIDER_MAP.get("@cf/mistral/mistral-7b-instruct-v0.2")
+            == "cloudflareai"
+        )
 
     def test_mapping_count(self) -> None:
         """测试映射数量"""

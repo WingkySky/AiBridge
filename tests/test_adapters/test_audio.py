@@ -41,7 +41,6 @@ from agn.adapters.base import Capabilities
 from agn.models.common import ProviderConfig
 from agn.models.audio import TranscriptionResult, SpeechResult
 
-
 # OpenAI 兼容 ASR/TTS 适配器（继承 OpenAICompatibleAudioMixin）
 AUDIO_ADAPTERS = [
     QwenAdapter,
@@ -98,19 +97,24 @@ class TestAudioCapabilitiesDeclaration:
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
 
-        assert Capabilities.AUDIO_TRANSCRIBE in adapter.supported_capabilities, \
-            f"{adapter_cls.__name__} 缺少 AUDIO_TRANSCRIBE 能力"
-        assert adapter.supports_capability(Capabilities.AUDIO_TRANSCRIBE), \
-            f"{adapter_cls.__name__} supports_capability(audio_transcribe) 返回 False"
+        assert (
+            Capabilities.AUDIO_TRANSCRIBE in adapter.supported_capabilities
+        ), f"{adapter_cls.__name__} 缺少 AUDIO_TRANSCRIBE 能力"
+        assert adapter.supports_capability(
+            Capabilities.AUDIO_TRANSCRIBE
+        ), f"{adapter_cls.__name__} supports_capability(audio_transcribe) 返回 False"
 
         if adapter_cls not in ASR_ONLY_ADAPTERS:
-            assert Capabilities.AUDIO_SPEECH in adapter.supported_capabilities, \
-                f"{adapter_cls.__name__} 缺少 AUDIO_SPEECH 能力"
-            assert adapter.supports_capability(Capabilities.AUDIO_SPEECH), \
-                f"{adapter_cls.__name__} supports_capability(audio_speech) 返回 False"
+            assert (
+                Capabilities.AUDIO_SPEECH in adapter.supported_capabilities
+            ), f"{adapter_cls.__name__} 缺少 AUDIO_SPEECH 能力"
+            assert adapter.supports_capability(
+                Capabilities.AUDIO_SPEECH
+            ), f"{adapter_cls.__name__} supports_capability(audio_speech) 返回 False"
         else:
-            assert Capabilities.AUDIO_SPEECH not in adapter.supported_capabilities, \
-                f"{adapter_cls.__name__} 不应支持 AUDIO_SPEECH（ASR-only）"
+            assert (
+                Capabilities.AUDIO_SPEECH not in adapter.supported_capabilities
+            ), f"{adapter_cls.__name__} 不应支持 AUDIO_SPEECH（ASR-only）"
 
     @pytest.mark.parametrize("adapter_cls", TTS_ONLY_ADAPTERS)
     def test_tts_only_adapter_capabilities(self, adapter_cls, mock_api_key):
@@ -118,12 +122,15 @@ class TestAudioCapabilitiesDeclaration:
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
 
-        assert Capabilities.AUDIO_SPEECH in adapter.supported_capabilities, \
-            f"{adapter_cls.__name__} 缺少 AUDIO_SPEECH 能力"
-        assert adapter.supports_capability(Capabilities.AUDIO_SPEECH), \
-            f"{adapter_cls.__name__} supports_capability(audio_speech) 返回 False"
-        assert Capabilities.AUDIO_TRANSCRIBE not in adapter.supported_capabilities, \
-            f"{adapter_cls.__name__} 不应支持 AUDIO_TRANSCRIBE（TTS-only）"
+        assert (
+            Capabilities.AUDIO_SPEECH in adapter.supported_capabilities
+        ), f"{adapter_cls.__name__} 缺少 AUDIO_SPEECH 能力"
+        assert adapter.supports_capability(
+            Capabilities.AUDIO_SPEECH
+        ), f"{adapter_cls.__name__} supports_capability(audio_speech) 返回 False"
+        assert (
+            Capabilities.AUDIO_TRANSCRIBE not in adapter.supported_capabilities
+        ), f"{adapter_cls.__name__} 不应支持 AUDIO_TRANSCRIBE（TTS-only）"
 
     @pytest.mark.parametrize("adapter_cls", AUDIO_ADAPTERS + STANDALONE_ASR_ADAPTERS)
     def test_adapter_has_audio_methods(self, adapter_cls, mock_api_key):
@@ -155,16 +162,35 @@ class TestAudioCapabilitiesDeclaration:
 class TestAudioModelsInList:
     """测试语音模型在 list_models 中正确列出"""
 
-    @pytest.mark.parametrize("adapter_cls,expected_asr_models,expected_tts_models", [
-        (QwenAdapter, ["sensevoice-v1"], ["cosyvoice-v1"]),
-        (DoubaoAdapter, ["doubao-asr"], ["doubao-tts"]),
-        (MiniMaxAdapter, ["abab-asr"], ["abab-tts", "speech-01"]),
-        (SiliconFlowAdapter, ["FunAudioLLM/SenseVoiceSmall", "iic/SenseVoiceSmall"], []),
-        (TogetherAIAdapter, ["openai/whisper-large-v3", "openai/whisper-large-v3-turbo"], []),
-        (FireworksAIAdapter, ["accounts/fireworks/models/whisper-v3"], []),
-        (OpenAIAdapter, ["whisper-1"], ["tts-1", "tts-1-hd"]),
-        (GroqAdapter, ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"], []),
-    ])
+    @pytest.mark.parametrize(
+        "adapter_cls,expected_asr_models,expected_tts_models",
+        [
+            (QwenAdapter, ["sensevoice-v1"], ["cosyvoice-v1"]),
+            (DoubaoAdapter, ["doubao-asr"], ["doubao-tts"]),
+            (MiniMaxAdapter, ["abab-asr"], ["abab-tts", "speech-01"]),
+            (
+                SiliconFlowAdapter,
+                ["FunAudioLLM/SenseVoiceSmall", "iic/SenseVoiceSmall"],
+                [],
+            ),
+            (
+                TogetherAIAdapter,
+                ["openai/whisper-large-v3", "openai/whisper-large-v3-turbo"],
+                [],
+            ),
+            (FireworksAIAdapter, ["accounts/fireworks/models/whisper-v3"], []),
+            (OpenAIAdapter, ["whisper-1"], ["tts-1", "tts-1-hd"]),
+            (
+                GroqAdapter,
+                [
+                    "whisper-large-v3",
+                    "whisper-large-v3-turbo",
+                    "distil-whisper-large-v3-en",
+                ],
+                [],
+            ),
+        ],
+    )
     @pytest.mark.asyncio
     async def test_list_models_includes_audio_models(
         self, adapter_cls, expected_asr_models, expected_tts_models, mock_api_key
@@ -179,26 +205,36 @@ class TestAudioModelsInList:
 
         for model_id in expected_asr_models:
             assert model_id in model_ids, f"模型列表缺少 ASR 模型: {model_id}"
-            assert "audio_transcribe" in model_capabilities[model_id], \
-                f"模型 {model_id} 缺少 audio_transcribe 能力标记"
+            assert (
+                "audio_transcribe" in model_capabilities[model_id]
+            ), f"模型 {model_id} 缺少 audio_transcribe 能力标记"
 
         for model_id in expected_tts_models:
             assert model_id in model_ids, f"模型列表缺少 TTS 模型: {model_id}"
-            assert "audio_speech" in model_capabilities[model_id], \
-                f"模型 {model_id} 缺少 audio_speech 能力标记"
+            assert (
+                "audio_speech" in model_capabilities[model_id]
+            ), f"模型 {model_id} 缺少 audio_speech 能力标记"
 
-    @pytest.mark.parametrize("adapter_cls,expected_tts_models", [
-        (ElevenLabsAdapter, [
-            "eleven_multilingual_v2",
-            "eleven_multilingual_v1",
-            "eleven_monolingual_v1",
-            "eleven_turbo_v2_5",
-            "eleven_turbo_v2",
-            "eleven_flash_v2_5",
-        ]),
-    ])
+    @pytest.mark.parametrize(
+        "adapter_cls,expected_tts_models",
+        [
+            (
+                ElevenLabsAdapter,
+                [
+                    "eleven_multilingual_v2",
+                    "eleven_multilingual_v1",
+                    "eleven_monolingual_v1",
+                    "eleven_turbo_v2_5",
+                    "eleven_turbo_v2",
+                    "eleven_flash_v2_5",
+                ],
+            ),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_list_models_tts_only_adapters(self, adapter_cls, expected_tts_models, mock_api_key):
+    async def test_list_models_tts_only_adapters(
+        self, adapter_cls, expected_tts_models, mock_api_key
+    ):
         """测试 TTS-only 适配器的模型列表"""
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
@@ -209,20 +245,39 @@ class TestAudioModelsInList:
 
         for model_id in expected_tts_models:
             assert model_id in model_ids, f"模型列表缺少 TTS 模型: {model_id}"
-            assert "audio_speech" in model_capabilities[model_id], \
-                f"模型 {model_id} 缺少 audio_speech 能力标记"
+            assert (
+                "audio_speech" in model_capabilities[model_id]
+            ), f"模型 {model_id} 缺少 audio_speech 能力标记"
 
-    @pytest.mark.parametrize("adapter_cls,expected_asr_models", [
-        (DeepgramAdapter, [
-            "nova-3", "nova-2", "nova-2-general", "nova-2-meeting",
-            "nova-2-phonecall", "nova-2-conversationalai", "nova-2-video",
-            "nova-2-medical", "nova-2-finance", "nova-2-drivethru",
-            "whisper-large", "whisper-medium", "whisper-small",
-            "enhanced", "base",
-        ]),
-    ])
+    @pytest.mark.parametrize(
+        "adapter_cls,expected_asr_models",
+        [
+            (
+                DeepgramAdapter,
+                [
+                    "nova-3",
+                    "nova-2",
+                    "nova-2-general",
+                    "nova-2-meeting",
+                    "nova-2-phonecall",
+                    "nova-2-conversationalai",
+                    "nova-2-video",
+                    "nova-2-medical",
+                    "nova-2-finance",
+                    "nova-2-drivethru",
+                    "whisper-large",
+                    "whisper-medium",
+                    "whisper-small",
+                    "enhanced",
+                    "base",
+                ],
+            ),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_list_models_asr_only_standalone_adapters(self, adapter_cls, expected_asr_models, mock_api_key):
+    async def test_list_models_asr_only_standalone_adapters(
+        self, adapter_cls, expected_asr_models, mock_api_key
+    ):
         """测试独立 ASR 适配器（Deepgram）的模型列表"""
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
@@ -233,8 +288,9 @@ class TestAudioModelsInList:
 
         for model_id in expected_asr_models:
             assert model_id in model_ids, f"模型列表缺少 ASR 模型: {model_id}"
-            assert "audio_transcribe" in model_capabilities[model_id], \
-                f"模型 {model_id} 缺少 audio_transcribe 能力标记"
+            assert (
+                "audio_transcribe" in model_capabilities[model_id]
+            ), f"模型 {model_id} 缺少 audio_transcribe 能力标记"
 
     @pytest.mark.parametrize("adapter_cls", ALL_ASR_ADAPTERS)
     @pytest.mark.asyncio
@@ -246,7 +302,9 @@ class TestAudioModelsInList:
 
         assert len(models) > 0, "应该有语音模型"
         for m in models:
-            assert m.type == "audio", f"模型 {m.id} 的 type 应该是 audio，实际是 {m.type}"
+            assert (
+                m.type == "audio"
+            ), f"模型 {m.id} 的 type 应该是 audio，实际是 {m.type}"
 
     @pytest.mark.parametrize("adapter_cls", TTS_ONLY_ADAPTERS)
     @pytest.mark.asyncio
@@ -258,7 +316,9 @@ class TestAudioModelsInList:
 
         assert len(models) > 0, "应该有语音模型"
         for m in models:
-            assert m.type == "audio", f"模型 {m.id} 的 type 应该是 audio，实际是 {m.type}"
+            assert (
+                m.type == "audio"
+            ), f"模型 {m.id} 的 type 应该是 audio，实际是 {m.type}"
             assert "audio_speech" in m.capabilities
 
 
@@ -281,7 +341,9 @@ class TestGetAudioBytes:
 
     @pytest.mark.parametrize("adapter_cls", AUDIO_ADAPTERS)
     @pytest.mark.asyncio
-    async def test_get_audio_bytes_from_file_like_object(self, adapter_cls, mock_api_key):
+    async def test_get_audio_bytes_from_file_like_object(
+        self, adapter_cls, mock_api_key
+    ):
         """测试从类文件对象读取音频"""
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
@@ -296,7 +358,9 @@ class TestGetAudioBytes:
 
     @pytest.mark.parametrize("adapter_cls", AUDIO_ADAPTERS)
     @pytest.mark.asyncio
-    async def test_get_audio_bytes_from_file_path(self, adapter_cls, mock_api_key, tmp_path):
+    async def test_get_audio_bytes_from_file_path(
+        self, adapter_cls, mock_api_key, tmp_path
+    ):
         """测试从文件路径读取音频"""
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
@@ -325,7 +389,9 @@ class TestGetAudioBytes:
 
     @pytest.mark.parametrize("adapter_cls", AUDIO_ADAPTERS)
     @pytest.mark.asyncio
-    async def test_get_audio_bytes_from_base64_with_prefix(self, adapter_cls, mock_api_key):
+    async def test_get_audio_bytes_from_base64_with_prefix(
+        self, adapter_cls, mock_api_key
+    ):
         """测试从带 data:audio/...;base64, 前缀的 base64 读取"""
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
@@ -377,7 +443,9 @@ class TestTranscribeMethod:
             "duration": 2.5,
         }
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             test_audio = b"fake wav data"
@@ -411,7 +479,14 @@ class TestTranscribeMethod:
             "language": "zh",
             "duration": 1.0,
             "segments": [
-                {"id": 0, "seek": 0, "start": 0.0, "end": 1.0, "text": "测试分段", "tokens": []}
+                {
+                    "id": 0,
+                    "seek": 0,
+                    "start": 0.0,
+                    "end": 1.0,
+                    "text": "测试分段",
+                    "tokens": [],
+                }
             ],
             "words": [
                 {"word": "测试", "start": 0.0, "end": 0.5},
@@ -419,7 +494,9 @@ class TestTranscribeMethod:
             ],
         }
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -440,7 +517,9 @@ class TestTranscribeMethod:
 
     @pytest.mark.parametrize("adapter_cls", AUDIO_ADAPTERS)
     @pytest.mark.asyncio
-    async def test_transcribe_unsupported_file_type_raises(self, adapter_cls, mock_api_key):
+    async def test_transcribe_unsupported_file_type_raises(
+        self, adapter_cls, mock_api_key
+    ):
         """测试不支持的文件类型抛出异常"""
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
@@ -463,7 +542,9 @@ class TestTranscribeMethod:
             "duration": 2.0,
         }
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.translate(
@@ -505,7 +586,9 @@ class TestSpeechMethod:
 
         test_audio = b"fake tts audio"
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_speech_response(test_audio)
 
             result = await adapter.speech(
@@ -539,8 +622,12 @@ class TestSpeechMethod:
         adapter = adapter_cls(config=config)
         await adapter.start()
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = self._mock_speech_response(b"wav data", format="wav")
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._mock_speech_response(
+                b"wav data", format="wav"
+            )
 
             result = await adapter.speech(
                 model="test-tts",
@@ -566,7 +653,9 @@ class TestSpeechMethod:
 
         test_data = b"test audio content for saving"
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_speech_response(test_data)
 
             result = await adapter.speech(
@@ -591,7 +680,9 @@ class TestSpeechMethod:
         adapter = OpenAIAdapter(config=config)
         await adapter.start()
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_speech_response()
 
             result = await adapter.speech(
@@ -635,11 +726,11 @@ class TestRouterAudioMapping:
         MODEL_PROVIDER_MAP = Router.MODEL_PROVIDER_MAP
 
         for model_id, expected_provider in expected_mappings.items():
-            assert model_id in MODEL_PROVIDER_MAP, \
-                f"路由表缺少模型映射: {model_id}"
-            assert MODEL_PROVIDER_MAP[model_id] == expected_provider, \
-                f"模型 {model_id} 应该映射到 {expected_provider}，" \
+            assert model_id in MODEL_PROVIDER_MAP, f"路由表缺少模型映射: {model_id}"
+            assert MODEL_PROVIDER_MAP[model_id] == expected_provider, (
+                f"模型 {model_id} 应该映射到 {expected_provider}，"
                 f"实际是 {MODEL_PROVIDER_MAP[model_id]}"
+            )
 
 
 class TestTranscribeEdgeCases:
@@ -664,7 +755,9 @@ class TestTranscribeEdgeCases:
         test_file = tmp_path / "test.wav"
         test_file.write_bytes(b"fake wav content")
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             with open(test_file, "rb") as f:
@@ -688,7 +781,9 @@ class TestTranscribeEdgeCases:
 
         mock_result = {"text": "参数测试"}
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             await adapter.transcribe(
@@ -717,7 +812,9 @@ class TestTranscribeEdgeCases:
         test_audio = b"base64 audio data"
         b64_audio = base64.b64encode(test_audio).decode("utf-8")
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -752,7 +849,9 @@ class TestSpeechEdgeCases:
 
         formats = ["opus", "aac", "flac", "wav", "pcm"]
         for fmt in formats:
-            with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+            with patch.object(
+                adapter._http_client, "post", new_callable=AsyncMock
+            ) as mock_post:
                 mock_post.return_value = self._mock_speech_response(b"data", format=fmt)
                 result = await adapter.speech(
                     model="tts-1",
@@ -791,6 +890,7 @@ class TestAudioDataModels:
     def test_transcription_result_with_all_fields(self):
         """测试 TranscriptionResult 完整字段"""
         from agn.models.audio import TranscriptionSegment, TranscriptionWord
+
         result = TranscriptionResult(
             text="完整测试",
             language="en",
@@ -829,6 +929,7 @@ class TestAudioDataModels:
     def test_segment_defaults(self):
         """测试 TranscriptionSegment 默认值"""
         from agn.models.audio import TranscriptionSegment
+
         seg = TranscriptionSegment(id=0, start=0.0, end=1.0, text="test")
         assert seg.id == 0
         assert seg.avg_logprob is None
@@ -841,6 +942,7 @@ class TestAudioDataModels:
     def test_word_structure(self):
         """测试 TranscriptionWord 结构"""
         from agn.models.audio import TranscriptionWord
+
         word = TranscriptionWord(word="你好", start=0.0, end=0.5)
         assert word.word == "你好"
         assert word.start == 0.0
@@ -874,7 +976,9 @@ class TestGroqWhisperASR:
             "duration": 1.5,
         }
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -906,7 +1010,9 @@ class TestGroqWhisperASR:
             "x_groq": {"id": "test-id"},
         }
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -946,7 +1052,9 @@ class TestGroqWhisperASR:
             "language": "en",
         }
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.translate(
@@ -1007,7 +1115,9 @@ class TestElevenLabsTTS:
 
         test_audio = b"elevenlabs mp3 audio data"
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_speech_response(test_audio)
 
             result = await adapter.speech(
@@ -1040,7 +1150,9 @@ class TestElevenLabsTTS:
         adapter = ElevenLabsAdapter(config=config)
         await adapter.start()
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_speech_response(b"audio")
 
             await adapter.speech(
@@ -1076,8 +1188,12 @@ class TestElevenLabsTTS:
         ]
 
         for fmt, expected_ct in format_tests:
-            with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
-                mock_post.return_value = self._mock_speech_response(b"data", expected_ct)
+            with patch.object(
+                adapter._http_client, "post", new_callable=AsyncMock
+            ) as mock_post:
+                mock_post.return_value = self._mock_speech_response(
+                    b"data", expected_ct
+                )
 
                 result = await adapter.speech(
                     model="eleven_turbo_v2_5",
@@ -1120,8 +1236,12 @@ class TestElevenLabsTTS:
         adapter = ElevenLabsAdapter(config=config)
         await adapter.start()
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = self._mock_error_response(401, {"detail": {"message": "Unauthorized"}})
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
+            mock_post.return_value = self._mock_error_response(
+                401, {"detail": {"message": "Unauthorized"}}
+            )
 
             with pytest.raises(AuthenticationError, match="Invalid ElevenLabs API key"):
                 await adapter.speech(
@@ -1141,7 +1261,9 @@ class TestElevenLabsTTS:
         adapter = ElevenLabsAdapter(config=config)
         await adapter.start()
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_error_response(404)
 
             with pytest.raises(APIError) as exc_info:
@@ -1194,8 +1316,9 @@ class TestRouterAudioMappingExtended:
         MODEL_MAP = Router.MODEL_PROVIDER_MAP
         for model_id, provider in expected.items():
             assert model_id in MODEL_MAP, f"路由表缺少 Groq 模型: {model_id}"
-            assert MODEL_MAP[model_id] == provider, \
-                f"{model_id} 应映射到 {provider}，实际是 {MODEL_MAP[model_id]}"
+            assert (
+                MODEL_MAP[model_id] == provider
+            ), f"{model_id} 应映射到 {provider}，实际是 {MODEL_MAP[model_id]}"
 
     def test_router_has_elevenlabs_mappings(self):
         """测试路由表包含 ElevenLabs TTS 模型映射"""
@@ -1213,8 +1336,9 @@ class TestRouterAudioMappingExtended:
         MODEL_MAP = Router.MODEL_PROVIDER_MAP
         for model_id in expected_models:
             assert model_id in MODEL_MAP, f"路由表缺少 ElevenLabs 模型: {model_id}"
-            assert MODEL_MAP[model_id] == "elevenlabs", \
-                f"{model_id} 应映射到 elevenlabs，实际是 {MODEL_MAP[model_id]}"
+            assert (
+                MODEL_MAP[model_id] == "elevenlabs"
+            ), f"{model_id} 应映射到 elevenlabs，实际是 {MODEL_MAP[model_id]}"
 
     def test_whisper_large_v3_routes_to_groq_not_openai(self):
         """测试 whisper-large-v3（Groq）与 whisper-1（OpenAI）不冲突"""
@@ -1267,7 +1391,9 @@ class TestDeepgramGetAudioBytes:
         assert mime == "audio/mpeg"
 
     @pytest.mark.asyncio
-    async def test_deepgram_get_audio_bytes_from_flac_path(self, mock_api_key, tmp_path):
+    async def test_deepgram_get_audio_bytes_from_flac_path(
+        self, mock_api_key, tmp_path
+    ):
         """测试 FLAC 文件路径返回 audio/flac MIME"""
         config = ProviderConfig(provider_type="deepgram", api_key=mock_api_key)
         adapter = DeepgramAdapter(config=config)
@@ -1417,7 +1543,9 @@ class TestDeepgramASR:
             language="en",
         )
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -1462,7 +1590,9 @@ class TestDeepgramASR:
             words=words,
         )
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -1515,7 +1645,9 @@ class TestDeepgramASR:
             paragraphs=paragraphs,
         )
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -1554,7 +1686,9 @@ class TestDeepgramASR:
             duration=2.0,
         )
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -1571,7 +1705,9 @@ class TestDeepgramASR:
         await adapter.close()
 
     @pytest.mark.asyncio
-    async def test_deepgram_transcribe_content_type_from_ext(self, mock_api_key, tmp_path):
+    async def test_deepgram_transcribe_content_type_from_ext(
+        self, mock_api_key, tmp_path
+    ):
         """测试文件扩展名决定 Content-Type"""
         config = ProviderConfig(provider_type="deepgram", api_key=mock_api_key)
         adapter = DeepgramAdapter(config=config)
@@ -1582,7 +1718,9 @@ class TestDeepgramASR:
 
         mock_result = self._make_deepgram_response("ok")
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             await adapter.transcribe(model="nova-3", file=str(test_file))
@@ -1618,7 +1756,9 @@ class TestDeepgramASR:
         error_resp.json = MagicMock(return_value={"err_msg": "Invalid API key"})
         error_resp.text = "Unauthorized"
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = error_resp
 
             with pytest.raises(AuthenticationError, match="Invalid Deepgram"):
@@ -1639,7 +1779,9 @@ class TestDeepgramASR:
         error_resp.status_code = 429
         error_resp.json = MagicMock(return_value={"err_msg": "Rate limit exceeded"})
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = error_resp
 
             with pytest.raises(RateLimitError, match="Deepgram rate limit"):
@@ -1661,7 +1803,9 @@ class TestDeepgramASR:
         error_resp.json = MagicMock(return_value={"err_msg": "Invalid model parameter"})
         error_resp.text = '{"err_msg":"Invalid model parameter"}'
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = error_resp
 
             with pytest.raises(APIError) as exc_info:
@@ -1682,7 +1826,9 @@ class TestDeepgramASR:
             model="nova-3",
         )
 
-        with patch.object(adapter._http_client, "post", new_callable=AsyncMock) as mock_post:
+        with patch.object(
+            adapter._http_client, "post", new_callable=AsyncMock
+        ) as mock_post:
             mock_post.return_value = self._mock_response(mock_result)
 
             result = await adapter.transcribe(
@@ -1744,8 +1890,9 @@ class TestRouterDeepgramMapping:
         MODEL_MAP = Router.MODEL_PROVIDER_MAP
         for model_id, provider in expected.items():
             assert model_id in MODEL_MAP, f"路由表缺少 Deepgram 模型: {model_id}"
-            assert MODEL_MAP[model_id] == provider, \
-                f"{model_id} 应映射到 {provider}，实际是 {MODEL_MAP[model_id]}"
+            assert (
+                MODEL_MAP[model_id] == provider
+            ), f"{model_id} 应映射到 {provider}，实际是 {MODEL_MAP[model_id]}"
 
     def test_router_has_deepgram_whisper_models(self):
         """测试路由表包含 Deepgram 托管的 Whisper 模型"""
@@ -1798,6 +1945,7 @@ class TestAssemblyAIGetAudioBytes:
     def test_get_audio_bytes_with_raw_bytes(self):
         """测试 bytes 输入直接返回"""
         import pytest
+
         pytestmark = pytest.mark.asyncio
 
         async def _test():
@@ -1810,10 +1958,12 @@ class TestAssemblyAIGetAudioBytes:
                 await self.adapter.close()
 
         import asyncio
+
         asyncio.run(_test())
 
     def test_get_audio_bytes_with_file_path(self):
         """测试从磁盘文件读取音频"""
+
         async def _test():
             await self.adapter.start()
             try:
@@ -1826,15 +1976,18 @@ class TestAssemblyAIGetAudioBytes:
                     assert mime == "application/octet-stream"
                 finally:
                     import os
+
                     os.unlink(tmp_path)
             finally:
                 await self.adapter.close()
 
         import asyncio
+
         asyncio.run(_test())
 
     def test_get_audio_bytes_with_nonexistent_path_raises(self):
         """测试不存在的文件路径抛出 FileNotFoundError"""
+
         async def _test():
             await self.adapter.start()
             try:
@@ -1844,10 +1997,12 @@ class TestAssemblyAIGetAudioBytes:
                 await self.adapter.close()
 
         import asyncio
+
         asyncio.run(_test())
 
     def test_get_audio_bytes_with_file_object(self):
         """测试类文件对象读取"""
+
         async def _test():
             await self.adapter.start()
             try:
@@ -1859,11 +2014,13 @@ class TestAssemblyAIGetAudioBytes:
                 await self.adapter.close()
 
         import asyncio
+
         asyncio.run(_test())
 
     def test_get_audio_bytes_with_data_uri(self):
         """测试 data:audio/...;base64 URI 解码"""
         import base64 as b64
+
         async def _test():
             await self.adapter.start()
             try:
@@ -1876,10 +2033,12 @@ class TestAssemblyAIGetAudioBytes:
                 await self.adapter.close()
 
         import asyncio
+
         asyncio.run(_test())
 
     def test_get_audio_bytes_with_invalid_type_raises(self):
         """测试不支持的输入类型抛出 ValueError"""
+
         async def _test():
             await self.adapter.start()
             try:
@@ -1889,6 +2048,7 @@ class TestAssemblyAIGetAudioBytes:
                 await self.adapter.close()
 
         import asyncio
+
         asyncio.run(_test())
 
 
@@ -1915,6 +2075,7 @@ class TestAssemblyAIASR:
     async def test_speech_raises_unsupported(self, mock_api_key):
         """测试 TTS 能力不支持"""
         from agn.core.errors import UnsupportedCapabilityError
+
         await self.adapter.start()
         try:
             with pytest.raises(UnsupportedCapabilityError):
@@ -1930,7 +2091,9 @@ class TestAssemblyAIASR:
             mock_client = AsyncMock()
             upload_resp = MagicMock()
             upload_resp.status_code = 200
-            upload_resp.json.return_value = {"upload_url": "https://cdn.assemblyai.com/upload/abc123"}
+            upload_resp.json.return_value = {
+                "upload_url": "https://cdn.assemblyai.com/upload/abc123"
+            }
 
             submit_resp = MagicMock()
             submit_resp.status_code = 200
@@ -1938,7 +2101,10 @@ class TestAssemblyAIASR:
 
             poll_processing = MagicMock()
             poll_processing.status_code = 200
-            poll_processing.json.return_value = {"id": "trans-123", "status": "processing"}
+            poll_processing.json.return_value = {
+                "id": "trans-123",
+                "status": "processing",
+            }
 
             poll_completed = MagicMock()
             poll_completed.status_code = 200
@@ -1987,7 +2153,9 @@ class TestAssemblyAIASR:
             mock_client = AsyncMock()
 
             upload_resp = MagicMock(status_code=200)
-            upload_resp.json.return_value = {"upload_url": "https://cdn.assemblyai.com/upload/abc"}
+            upload_resp.json.return_value = {
+                "upload_url": "https://cdn.assemblyai.com/upload/abc"
+            }
 
             submit_resp = MagicMock(status_code=200)
             submit_resp.json.return_value = {"id": "t1", "status": "queued"}
@@ -2006,8 +2174,20 @@ class TestAssemblyAIASR:
                         "confidence": 0.98,
                         "speaker": "A",
                         "words": [
-                            {"text": "Hello", "start": 0, "end": 500, "confidence": 0.99, "speaker": "A"},
-                            {"text": "from", "start": 500, "end": 1000, "confidence": 0.97, "speaker": "A"},
+                            {
+                                "text": "Hello",
+                                "start": 0,
+                                "end": 500,
+                                "confidence": 0.99,
+                                "speaker": "A",
+                            },
+                            {
+                                "text": "from",
+                                "start": 500,
+                                "end": 1000,
+                                "confidence": 0.97,
+                                "speaker": "A",
+                            },
                         ],
                     },
                     {
@@ -2017,7 +2197,13 @@ class TestAssemblyAIASR:
                         "confidence": 0.96,
                         "speaker": "B",
                         "words": [
-                            {"text": "and", "start": 1500, "end": 2000, "confidence": 0.95, "speaker": "B"},
+                            {
+                                "text": "and",
+                                "start": 1500,
+                                "end": 2000,
+                                "confidence": 0.95,
+                                "speaker": "B",
+                            },
                         ],
                     },
                 ],
@@ -2029,7 +2215,10 @@ class TestAssemblyAIASR:
             self.adapter._handle_error = MagicMock()
 
             result = await self.adapter.transcribe(
-                "best", b"audio", speaker_labels=True, polling_interval=0.001,
+                "best",
+                b"audio",
+                speaker_labels=True,
+                polling_interval=0.001,
             )
 
             assert result.segments is not None
@@ -2064,14 +2253,18 @@ class TestAssemblyAIASR:
             self.adapter._handle_error = MagicMock()
 
             result = await self.adapter.transcribe(
-                "best", b"x",
+                "best",
+                b"x",
                 audio_url="https://example.com/audio.mp3",
                 polling_interval=0.001,
             )
             assert result.text == "direct url test"
             assert mock_client.post.call_count == 1
             submitted_payload = mock_client.post.call_args_list[0]
-            assert submitted_payload.kwargs["json"]["audio_url"] == "https://example.com/audio.mp3"
+            assert (
+                submitted_payload.kwargs["json"]["audio_url"]
+                == "https://example.com/audio.mp3"
+            )
         finally:
             await self.adapter.close()
 
@@ -2087,7 +2280,10 @@ class TestAssemblyAIASR:
             submit_resp.json.return_value = {"id": "t2", "status": "queued"}
             completed = MagicMock(status_code=200)
             completed.json.return_value = {
-                "id": "t2", "status": "completed", "text": "测试", "words": [],
+                "id": "t2",
+                "status": "completed",
+                "text": "测试",
+                "words": [],
             }
             mock_client.post = AsyncMock(side_effect=[upload_resp, submit_resp])
             mock_client.get = AsyncMock(return_value=completed)
@@ -2095,7 +2291,8 @@ class TestAssemblyAIASR:
             self.adapter._handle_error = MagicMock()
 
             await self.adapter.transcribe(
-                "best", b"audio",
+                "best",
+                b"audio",
                 language_code="zh",
                 filter_profanity=True,
                 sentiment_analysis=True,
@@ -2127,7 +2324,10 @@ class TestAssemblyAIASR:
             submit_resp.json.return_value = {"id": "t3", "status": "queued"}
             completed = MagicMock(status_code=200)
             completed.json.return_value = {
-                "id": "t3", "status": "completed", "text": "ok", "words": [],
+                "id": "t3",
+                "status": "completed",
+                "text": "ok",
+                "words": [],
             }
             mock_client.post = AsyncMock(side_effect=[upload_resp, submit_resp])
             mock_client.get = AsyncMock(return_value=completed)
@@ -2135,7 +2335,9 @@ class TestAssemblyAIASR:
             self.adapter._handle_error = MagicMock()
 
             await self.adapter.transcribe(
-                "invalid_model", b"audio", polling_interval=0.001,
+                "invalid_model",
+                b"audio",
+                polling_interval=0.001,
             )
             submitted_json = mock_client.post.call_args_list[1].kwargs["json"]
             assert submitted_json["speech_model"] == "best"
@@ -2146,6 +2348,7 @@ class TestAssemblyAIASR:
     async def test_transcribe_handles_error_status(self):
         """测试转写错误状态抛出异常"""
         from agn.core.errors import APIError
+
         await self.adapter.start()
         try:
             mock_client = AsyncMock()
@@ -2155,7 +2358,9 @@ class TestAssemblyAIASR:
             submit_resp.json.return_value = {"id": "t-err", "status": "queued"}
             err_poll = MagicMock(status_code=200)
             err_poll.json.return_value = {
-                "id": "t-err", "status": "error", "error": "Audio too short",
+                "id": "t-err",
+                "status": "error",
+                "error": "Audio too short",
             }
             mock_client.post = AsyncMock(side_effect=[upload_resp, submit_resp])
             mock_client.get = AsyncMock(return_value=err_poll)
@@ -2163,7 +2368,9 @@ class TestAssemblyAIASR:
             self.adapter._handle_error = MagicMock()
 
             with pytest.raises(APIError, match="Audio too short"):
-                await self.adapter.transcribe("best", b"x", polling_interval=0.001, max_polls=5)
+                await self.adapter.transcribe(
+                    "best", b"x", polling_interval=0.001, max_polls=5
+                )
         finally:
             await self.adapter.close()
 
@@ -2186,6 +2393,7 @@ class TestAssemblyAIASR:
     def test_error_responses(self):
         """测试 HTTP 错误处理"""
         from agn.core.errors import APIError, AuthenticationError, RateLimitError
+
         # 401
         resp = MagicMock(status_code=401)
         resp.json.return_value = {"error": "Unauthorized"}
@@ -2250,6 +2458,7 @@ class TestCartesiaTTS:
     async def test_transcribe_raises_unsupported(self):
         """测试 ASR 能力不支持"""
         from agn.core.errors import UnsupportedCapabilityError
+
         await self.adapter.start()
         try:
             with pytest.raises(UnsupportedCapabilityError):
@@ -2304,9 +2513,15 @@ class TestCartesiaTTS:
             self.adapter._http_client = mock_client
             self.adapter._handle_error = MagicMock()
 
-            wav_fmt = {"container": "wav", "encoding": "pcm_f32le", "sample_rate": 24000}
+            wav_fmt = {
+                "container": "wav",
+                "encoding": "pcm_f32le",
+                "sample_rate": 24000,
+            }
             result = await self.adapter.speech(
-                "sonic-turbo", "Testing", voice="News Lady",
+                "sonic-turbo",
+                "Testing",
+                voice="News Lady",
                 output_format=wav_fmt,
             )
             assert result.format == "wav"
@@ -2331,7 +2546,8 @@ class TestCartesiaTTS:
             self.adapter._handle_error = MagicMock()
 
             await self.adapter.speech(
-                "sonic-2", "你好世界",
+                "sonic-2",
+                "你好世界",
                 voice="Chinese Woman",
                 language="zh",
                 speed=1.2,
@@ -2359,7 +2575,8 @@ class TestCartesiaTTS:
 
             custom_id = "00000000-0000-0000-0000-000000000000"
             await self.adapter.speech(
-                "sonic-2", "test",
+                "sonic-2",
+                "test",
                 voice="will be overridden",
                 voice_id=custom_id,
             )
@@ -2384,7 +2601,8 @@ class TestCartesiaTTS:
 
             embedding = [0.1, 0.2, 0.3]
             await self.adapter.speech(
-                "sonic-2", "clone me",
+                "sonic-2",
+                "clone me",
                 voice_embedding=embedding,
             )
 
@@ -2407,7 +2625,8 @@ class TestCartesiaTTS:
             self.adapter._handle_error = MagicMock()
 
             await self.adapter.speech(
-                "sonic-2", "continuation",
+                "sonic-2",
+                "continuation",
                 continuation=True,
                 add_timestamps=True,
             )
@@ -2462,6 +2681,7 @@ class TestCartesiaTTS:
     def test_error_responses(self):
         """测试 HTTP 错误处理"""
         from agn.core.errors import APIError, AuthenticationError, RateLimitError
+
         # 401
         resp = MagicMock(status_code=401)
         resp.json.return_value = {"message": "Unauthorized"}
@@ -2496,12 +2716,14 @@ class TestRouterAssemblyAICartesiaMapping:
 
     def test_router_has_assemblyai_models(self):
         from agn.router import Router
+
         MODEL_MAP = Router.MODEL_PROVIDER_MAP
         assert MODEL_MAP.get("best") == "assemblyai"
         assert MODEL_MAP.get("nano") == "assemblyai"
 
     def test_router_has_cartesia_models(self):
         from agn.router import Router
+
         MODEL_MAP = Router.MODEL_PROVIDER_MAP
         assert MODEL_MAP.get("sonic-2") == "cartesia"
         assert MODEL_MAP.get("sonic-turbo") == "cartesia"
@@ -2583,7 +2805,10 @@ class TestEdgeTTSAdapter:
 
     def test_resolve_voice_unknown_falls_back_to_default(self):
         """测试未知 voice 回退到默认"""
-        assert self.adapter._resolve_voice("nonexistent-voice") == self.adapter.DEFAULT_VOICE
+        assert (
+            self.adapter._resolve_voice("nonexistent-voice")
+            == self.adapter.DEFAULT_VOICE
+        )
 
     def test_output_format_mp3(self):
         """测试 MP3 输出格式"""
@@ -2630,6 +2855,7 @@ class TestEdgeTTSAdapter:
     async def test_transcribe_raises_unsupported(self):
         """测试 ASR 能力不支持"""
         from agn.core.errors import UnsupportedCapabilityError
+
         self.adapter._edge_tts_module = MagicMock()
         with pytest.raises(UnsupportedCapabilityError):
             await self.adapter.transcribe("edge-tts", b"x")
@@ -2681,7 +2907,8 @@ class TestEdgeTTSAdapter:
         self.adapter._edge_tts_module = mock_edge_tts
 
         await self.adapter.speech(
-            "edge-tts", "test",
+            "edge-tts",
+            "test",
             voice="yunxi",
             rate="+20%",
             pitch="+50Hz",
@@ -2695,9 +2922,9 @@ class TestEdgeTTSAdapter:
         assert call_kwargs["voice"] == "zh-CN-YunxiNeural"
 
     @pytest.mark.asyncio
-    async def test_speech_empty_audio_raises_error(self):
-        """测试 edge-tts 返回空音频时抛出 APIError，而非静默返回空结果"""
-        from agn.core.errors import APIError
+    async def test_speech_empty_audio_voice_online_raises_service_unavailable(self):
+        """测试空音频且 voice 仍在线时抛 ServiceUnavailableError（可重试）"""
+        from agn.core.errors import ServiceUnavailableError
 
         mock_edge_tts = MagicMock()
         mock_communicate = MagicMock()
@@ -2708,15 +2935,139 @@ class TestEdgeTTSAdapter:
 
         mock_communicate.stream = fake_stream_empty
         mock_edge_tts.Communicate = MagicMock(return_value=mock_communicate)
+        # list_voices 返回的列表包含当前 voice → 视为仍在线
+        mock_edge_tts.list_voices = AsyncMock(
+            return_value=[{"ShortName": "zh-CN-XiaoxiaoNeural"}]
+        )
         self.adapter._edge_tts_module = mock_edge_tts
+        # 重置类级缓存，避免被其他用例污染
+        EdgeTTSAdapter._voices_cache = None
 
-        with pytest.raises(APIError) as exc_info:
+        with pytest.raises(ServiceUnavailableError) as exc_info:
             await self.adapter.speech("edge-tts", "测试文本", voice="xiaoxiao")
 
         assert "空音频" in str(exc_info.value)
         assert exc_info.value.code == "NO_AUDIO_RECEIVED"
         assert exc_info.value.details["provider"] == "edge-tts"
         assert exc_info.value.details["voice"] == "zh-CN-XiaoxiaoNeural"
+
+    @pytest.mark.asyncio
+    async def test_speech_empty_audio_voice_offline_raises_voice_not_available(self):
+        """测试空音频且 voice 已下线时抛 VoiceNotAvailableError（应换音色）"""
+        from agn.core.errors import VoiceNotAvailableError
+
+        mock_edge_tts = MagicMock()
+        mock_communicate = MagicMock()
+
+        async def fake_stream_empty():
+            yield {"type": "WordBoundary", "offset": 100, "text": "hello"}
+
+        mock_communicate.stream = fake_stream_empty
+        mock_edge_tts.Communicate = MagicMock(return_value=mock_communicate)
+        # list_voices 返回的列表不包含当前 voice → 视为已下线
+        mock_edge_tts.list_voices = AsyncMock(
+            return_value=[{"ShortName": "zh-CN-XiaoyiNeural"}]
+        )
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        with pytest.raises(VoiceNotAvailableError) as exc_info:
+            await self.adapter.speech("edge-tts", "测试文本", voice="xiaoxiao")
+
+        assert "已下线" in str(exc_info.value)
+        assert exc_info.value.code == "VOICE_NOT_AVAILABLE"
+        assert exc_info.value.details["voice"] == "zh-CN-XiaoxiaoNeural"
+
+    @pytest.mark.asyncio
+    async def test_speech_fallback_with_voice_list_first_fails(self):
+        """测试 voice 列表 fallback：第一个失败（已下线），第二个成功"""
+        mock_edge_tts = MagicMock()
+
+        # 用 side_effect 让第一次返回空 stream（触发 voice 不可用），第二次返回有效音频
+        call_count = {"n": 0}
+
+        class _MockCommunicate:
+            def __init__(self) -> None:
+                self.stream = self._stream
+
+            async def _stream(self):
+                call_count["n"] += 1
+                if call_count["n"] == 1:
+                    # 第一次：空音频
+                    yield {"type": "WordBoundary", "offset": 100, "text": "hi"}
+                else:
+                    # 第二次：有效音频
+                    yield {"type": "audio", "data": b"fallback-audio"}
+
+        mock_edge_tts.Communicate = MagicMock(return_value=_MockCommunicate())
+        # list_voices 中只有第二个 voice，第一个视为已下线
+        mock_edge_tts.list_voices = AsyncMock(
+            return_value=[{"ShortName": "zh-CN-XiaoyiNeural"}]
+        )
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        result = await self.adapter.speech(
+            "edge-tts",
+            "测试",
+            voice=["zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"],
+        )
+
+        assert isinstance(result, SpeechResult)
+        assert result.audio_data == b"fallback-audio"
+        # 应该尝试了 2 次
+        assert call_count["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_speech_fallback_all_fail_raises_last_error(self):
+        """测试 voice 列表全部失败时抛出最后一个异常"""
+        from agn.core.errors import VoiceNotAvailableError
+
+        mock_edge_tts = MagicMock()
+
+        async def _empty_stream():
+            yield {"type": "WordBoundary", "offset": 100, "text": "hi"}
+
+        class _MockCommunicate:
+            def __init__(self) -> None:
+                self.stream = _empty_stream
+
+        mock_edge_tts.Communicate = MagicMock(return_value=_MockCommunicate())
+        # 两个 voice 都不在 list_voices 中 → 都视为已下线
+        mock_edge_tts.list_voices = AsyncMock(return_value=[])
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        with pytest.raises(VoiceNotAvailableError):
+            await self.adapter.speech(
+                "edge-tts",
+                "测试",
+                voice=["zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_speech_single_voice_service_unavailable_no_fallback(self):
+        """测试单 voice 模式下服务不可用时直接抛出（不降级）"""
+        from agn.core.errors import ServiceUnavailableError
+
+        mock_edge_tts = MagicMock()
+
+        async def _empty_stream():
+            yield {"type": "WordBoundary", "offset": 100, "text": "hi"}
+
+        class _MockCommunicate:
+            def __init__(self) -> None:
+                self.stream = _empty_stream
+
+        mock_edge_tts.Communicate = MagicMock(return_value=_MockCommunicate())
+        mock_edge_tts.list_voices = AsyncMock(
+            return_value=[{"ShortName": "zh-CN-XiaoxiaoNeural"}]
+        )
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        with pytest.raises(ServiceUnavailableError):
+            await self.adapter.speech("edge-tts", "测试", voice="xiaoxiao")
 
     @pytest.mark.asyncio
     async def test_speech_wav_format(self):
@@ -2732,7 +3083,8 @@ class TestEdgeTTSAdapter:
         self.adapter._edge_tts_module = mock_edge_tts
 
         result = await self.adapter.speech(
-            "edge-tts", "test",
+            "edge-tts",
+            "test",
             output_format="wav",
         )
         assert result.format == "wav"
@@ -2780,12 +3132,128 @@ class TestEdgeTTSAdapter:
             with pytest.raises(ImportError, match="edge-tts library not installed"):
                 adapter._get_edge_tts()
 
+    @pytest.mark.asyncio
+    async def test_list_voices_caches_result(self):
+        """测试 list_voices 结果会被缓存，第二次调用不再请求服务端"""
+        mock_edge_tts = MagicMock()
+        mock_voices = [
+            {"ShortName": "zh-CN-XiaoxiaoNeural", "Gender": "Female"},
+            {"ShortName": "zh-CN-YunxiNeural", "Gender": "Male"},
+        ]
+        mock_edge_tts.list_voices = AsyncMock(return_value=mock_voices)
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        # 第一次调用：应触发服务端请求
+        result1 = await self.adapter.list_voices()
+        assert result1 == mock_voices
+        assert mock_edge_tts.list_voices.await_count == 1
+
+        # 第二次调用：应命中缓存，不再请求
+        result2 = await self.adapter.list_voices()
+        assert result2 == mock_voices
+        assert mock_edge_tts.list_voices.await_count == 1  # 仍然只调用 1 次
+
+    @pytest.mark.asyncio
+    async def test_list_voices_filter_by_language(self):
+        """测试 list_voices 按 language 前缀过滤"""
+        mock_edge_tts = MagicMock()
+        mock_voices = [
+            {"ShortName": "zh-CN-XiaoxiaoNeural", "Locale": "zh-CN"},
+            {"ShortName": "zh-CN-YunxiNeural", "Locale": "zh-CN"},
+            {"ShortName": "en-US-JennyNeural", "Locale": "en-US"},
+        ]
+        mock_edge_tts.list_voices = AsyncMock(return_value=mock_voices)
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        result = await self.adapter.list_voices(language="zh-CN")
+        assert len(result) == 2
+        assert all(v["Locale"].startswith("zh-CN") for v in result)
+
+    @pytest.mark.asyncio
+    async def test_recommend_voices_filter_by_gender(self):
+        """测试 recommend_voices 按性别过滤"""
+        mock_edge_tts = MagicMock()
+        mock_voices = [
+            {"ShortName": "zh-CN-XiaoxiaoNeural", "Gender": "Female"},
+            {"ShortName": "zh-CN-YunxiNeural", "Gender": "Male"},
+            {"ShortName": "zh-CN-XiaoyiNeural", "Gender": "Female"},
+        ]
+        mock_edge_tts.list_voices = AsyncMock(return_value=mock_voices)
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        # 过滤女声
+        females = await self.adapter.recommend_voices(gender="female")
+        assert len(females) == 2
+        assert all(v["Gender"] == "Female" for v in females)
+
+        # 过滤男声
+        EdgeTTSAdapter._voices_cache = None  # 重置缓存
+        males = await self.adapter.recommend_voices(gender="male")
+        assert len(males) == 1
+        assert males[0]["ShortName"] == "zh-CN-YunxiNeural"
+
+    @pytest.mark.asyncio
+    async def test_recommend_voices_respects_limit(self):
+        """测试 recommend_voices 遵守 limit 参数"""
+        mock_edge_tts = MagicMock()
+        mock_voices = [
+            {"ShortName": f"zh-CN-Voice{i}Neural", "Gender": "Female"}
+            for i in range(20)
+        ]
+        mock_edge_tts.list_voices = AsyncMock(return_value=mock_voices)
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        result = await self.adapter.recommend_voices(gender="female", limit=5)
+        assert len(result) == 5
+
+    @pytest.mark.asyncio
+    async def test_check_voice_available_true_when_in_list(self):
+        """测试 _check_voice_available 在 voice 在列表中时返回 True"""
+        mock_edge_tts = MagicMock()
+        mock_edge_tts.list_voices = AsyncMock(
+            return_value=[{"ShortName": "zh-CN-XiaoxiaoNeural"}]
+        )
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        assert await self.adapter._check_voice_available("zh-CN-XiaoxiaoNeural") is True
+
+    @pytest.mark.asyncio
+    async def test_check_voice_available_false_when_not_in_list(self):
+        """测试 _check_voice_available 在 voice 不在列表中时返回 False"""
+        mock_edge_tts = MagicMock()
+        mock_edge_tts.list_voices = AsyncMock(
+            return_value=[{"ShortName": "zh-CN-XiaoyiNeural"}]
+        )
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        assert (
+            await self.adapter._check_voice_available("zh-CN-XiaoxiaoNeural") is False
+        )
+
+    @pytest.mark.asyncio
+    async def test_check_voice_available_defaults_true_on_query_failure(self):
+        """测试 _check_voice_available 查询失败时保守返回 True"""
+        mock_edge_tts = MagicMock()
+        mock_edge_tts.list_voices = AsyncMock(side_effect=Exception("network error"))
+        self.adapter._edge_tts_module = mock_edge_tts
+        EdgeTTSAdapter._voices_cache = None
+
+        # 查询失败时返回 True（保守视为可用，按服务端问题处理）
+        assert await self.adapter._check_voice_available("zh-CN-XiaoxiaoNeural") is True
+
 
 class TestRouterEdgeTTSMapping:
     """测试路由表包含 Edge TTS 模型映射"""
 
     def test_router_has_edge_tts_models(self):
         from agn.router import Router
+
         MODEL_MAP = Router.MODEL_PROVIDER_MAP
         assert MODEL_MAP.get("edge-tts") == "edge-tts"
         assert MODEL_MAP.get("edge_tts") == "edge-tts"
@@ -2794,6 +3262,7 @@ class TestRouterEdgeTTSMapping:
     def test_router_has_edge_tts_voice_shortcuts(self):
         """测试路由表包含常用语音快捷映射"""
         from agn.router import Router
+
         MODEL_MAP = Router.MODEL_PROVIDER_MAP
         assert MODEL_MAP.get("zh-CN-XiaoxiaoNeural") == "edge-tts"
         assert MODEL_MAP.get("zh-CN-YunxiNeural") == "edge-tts"
@@ -2807,3 +3276,34 @@ class TestRouterEdgeTTSMapping:
         assert AdapterFactory.get_adapter_class("edge_tts") is EdgeTTSAdapter
         assert AdapterFactory.get_adapter_class("edge") is EdgeTTSAdapter
         assert AdapterFactory.get_adapter_class("microsoft-tts") is EdgeTTSAdapter
+
+
+# ==================== BaseAdapter 音色查询默认实现测试 ====================
+
+
+class TestBaseAdapterVoiceDefaults:
+    """测试 BaseAdapter 的 list_voices/recommend_voices 默认实现"""
+
+    def setup_method(self):
+        # 用 ElevenLabsAdapter 作为不覆盖 list_voices 的代表（它没实现该方法）
+        self.config = ProviderConfig(provider_type="elevenlabs", api_key="test-key")
+        self.adapter = ElevenLabsAdapter(config=self.config)
+
+    @pytest.mark.asyncio
+    async def test_list_voices_default_raises_unsupported(self):
+        """测试未覆盖 list_voices 时抛 UnsupportedCapabilityError"""
+        from agn.core.errors import UnsupportedCapabilityError
+
+        with pytest.raises(UnsupportedCapabilityError) as exc_info:
+            await self.adapter.list_voices()
+
+        assert "list_voices" in str(exc_info.value)
+        assert exc_info.value.details["provider"] == "elevenlabs"
+
+    @pytest.mark.asyncio
+    async def test_recommend_voices_default_raises_unsupported(self):
+        """测试未覆盖 list_voices 时 recommend_voices 也抛 UnsupportedCapabilityError"""
+        from agn.core.errors import UnsupportedCapabilityError
+
+        with pytest.raises(UnsupportedCapabilityError):
+            await self.adapter.recommend_voices(language="en")

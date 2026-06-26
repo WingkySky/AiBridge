@@ -95,10 +95,14 @@ class TestQwenAdapterListModels:
         models = await adapter.list_models()
         for model in models:
             if model.type == "chat":
-                assert "chat" in model.capabilities, f"聊天模型 {model.id} 应该有 chat 能力"
+                assert (
+                    "chat" in model.capabilities
+                ), f"聊天模型 {model.id} 应该有 chat 能力"
             elif model.type == "audio":
-                has_audio_cap = ("audio_transcribe" in model.capabilities or 
-                               "audio_speech" in model.capabilities)
+                has_audio_cap = (
+                    "audio_transcribe" in model.capabilities
+                    or "audio_speech" in model.capabilities
+                )
                 assert has_audio_cap, f"音频模型 {model.id} 应该有 audio 能力"
 
 

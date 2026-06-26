@@ -100,28 +100,36 @@ class TestVolcengineCVAdapterStatusMapping:
 
     def test_map_pending_status(self) -> None:
         """测试 pending 状态映射"""
-        adapter = VolcengineCVAdapter(config=ProviderConfig(provider_type="volcengine_cv", api_key="test"))
+        adapter = VolcengineCVAdapter(
+            config=ProviderConfig(provider_type="volcengine_cv", api_key="test")
+        )
         assert adapter._map_video_status("queued") == "pending"
         assert adapter._map_video_status("pending") == "pending"
         assert adapter._map_video_status("submitted") == "pending"
 
     def test_map_processing_status(self) -> None:
         """测试 processing 状态映射"""
-        adapter = VolcengineCVAdapter(config=ProviderConfig(provider_type="volcengine_cv", api_key="test"))
+        adapter = VolcengineCVAdapter(
+            config=ProviderConfig(provider_type="volcengine_cv", api_key="test")
+        )
         assert adapter._map_video_status("processing") == "processing"
         assert adapter._map_video_status("running") == "processing"
         assert adapter._map_video_status("in_progress") == "processing"
 
     def test_map_success_status(self) -> None:
         """测试 success 状态映射"""
-        adapter = VolcengineCVAdapter(config=ProviderConfig(provider_type="volcengine_cv", api_key="test"))
+        adapter = VolcengineCVAdapter(
+            config=ProviderConfig(provider_type="volcengine_cv", api_key="test")
+        )
         assert adapter._map_video_status("succeeded") == "success"
         assert adapter._map_video_status("success") == "success"
         assert adapter._map_video_status("completed") == "success"
 
     def test_map_failed_status(self) -> None:
         """测试 failed 状态映射"""
-        adapter = VolcengineCVAdapter(config=ProviderConfig(provider_type="volcengine_cv", api_key="test"))
+        adapter = VolcengineCVAdapter(
+            config=ProviderConfig(provider_type="volcengine_cv", api_key="test")
+        )
         assert adapter._map_video_status("failed") == "failed"
         assert adapter._map_video_status("error") == "failed"
         assert adapter._map_video_status("cancelled") == "failed"

@@ -144,7 +144,10 @@ class TestAgnesAdapterChat:
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": "Hello! How can I help you?"},
+                    "message": {
+                        "role": "assistant",
+                        "content": "Hello! How can I help you?",
+                    },
                     "finish_reason": "stop",
                 }
             ],
@@ -262,9 +265,7 @@ class TestAgnesAdapterChat:
             mock_post.return_value = self._mock_response(mock_result)
 
             messages = [ChatMessage(**m) for m in sample_chat_messages]
-            result = await adapter.chat(
-                model="claude-3-sonnet", messages=messages
-            )
+            result = await adapter.chat(model="claude-3-sonnet", messages=messages)
 
             assert len(result.choices) == 2
             assert result.choices[0].index == 0
@@ -366,7 +367,9 @@ class TestAgnesAdapterImage:
             "created": 1700000000,
             "model": "image-model-v1",
             "data": [
-                {"b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}
+                {
+                    "b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                }
             ],
         }
 
@@ -621,9 +624,7 @@ class TestAgnesAdapterEmbed:
         mock_embedding = [0.1, 0.2, 0.3, 0.4, 0.5]
         mock_result = {
             "object": "list",
-            "data": [
-                {"object": "embedding", "index": 0, "embedding": mock_embedding}
-            ],
+            "data": [{"object": "embedding", "index": 0, "embedding": mock_embedding}],
             "model": "embedding-v1",
             "usage": {"prompt_tokens": 5, "total_tokens": 5},
         }
@@ -701,9 +702,7 @@ class TestAgnesAdapterEmbed:
 
         mock_result = {
             "object": "list",
-            "data": [
-                {"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}
-            ],
+            "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
             "model": "embedding-v1",
         }
 

@@ -1497,7 +1497,7 @@ class GroqAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model: str,
         input: str,
-        voice: str = "",
+        voice: str | list[str] = "",
         **kwargs: Any,
     ) -> Any:
         """Groq 目前不提供文字转语音(TTS)服务，仅支持 Whisper 语音识别"""

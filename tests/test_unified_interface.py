@@ -209,11 +209,13 @@ class TestParameterMapping:
                 "top_k": "topK",
             }
         )
-        params = mapping.apply({
-            "max_tokens": 2048,
-            "temperature": 0.7,
-            "stop": ["END"],
-        })
+        params = mapping.apply(
+            {
+                "max_tokens": 2048,
+                "temperature": 0.7,
+                "stop": ["END"],
+            }
+        )
         assert params["max_output_tokens"] == 2048
         assert params["temperature"] == 0.7
         assert params["stop_sequences"] == ["END"]
@@ -225,8 +227,12 @@ class TestParameterMapping:
         mapping = ParameterMapping(
             value_map={
                 "reasoning_effort": {
-                    ReasoningEffort.HIGH: {"thinking": {"type": "enabled", "budget_tokens": 16384}},
-                    ReasoningEffort.LOW: {"thinking": {"type": "enabled", "budget_tokens": 1024}},
+                    ReasoningEffort.HIGH: {
+                        "thinking": {"type": "enabled", "budget_tokens": 16384}
+                    },
+                    ReasoningEffort.LOW: {
+                        "thinking": {"type": "enabled", "budget_tokens": 1024}
+                    },
                 }
             }
         )
@@ -250,23 +256,27 @@ class TestParameterMapping:
     def test_remove_none_values(self) -> None:
         """测试 None 值移除"""
         mapping = ParameterMapping(remove_when_none=True)
-        params = mapping.apply({
-            "temperature": 0.7,
-            "max_tokens": None,
-            "top_p": None,
-        })
+        params = mapping.apply(
+            {
+                "temperature": 0.7,
+                "max_tokens": None,
+                "top_p": None,
+            }
+        )
         assert "temperature" in params
         assert "max_tokens" not in params
         assert "top_p" not in params
 
     def test_openai_compatible_mapping(self) -> None:
         """测试 OpenAI 兼容映射"""
-        params = OPENAI_COMPATIBLE_MAPPING.apply({
-            "temperature": 0.7,
-            "max_tokens": 2048,
-            "reasoning": True,
-            "web_search": False,
-        })
+        params = OPENAI_COMPATIBLE_MAPPING.apply(
+            {
+                "temperature": 0.7,
+                "max_tokens": 2048,
+                "reasoning": True,
+                "web_search": False,
+            }
+        )
         # reasoning=True 应该映射为 reasoning_effort=medium
         assert params["reasoning_effort"] == "medium"
         assert params["temperature"] == 0.7
@@ -328,6 +338,7 @@ class TestBaseAdapterHelpers:
         """测试 _merge_options 合并 Options 和 kwargs"""
         config = ProviderConfig(provider_type="openai", api_key="test-key")
         from agn.adapters.openai import OpenAIAdapter
+
         adapter = OpenAIAdapter(config=config)
 
         options = ChatOptions(temperature=0.7, max_tokens=1024)
@@ -342,6 +353,7 @@ class TestBaseAdapterHelpers:
         """测试 options=None 时只使用 kwargs"""
         config = ProviderConfig(provider_type="openai", api_key="test-key")
         from agn.adapters.openai import OpenAIAdapter
+
         adapter = OpenAIAdapter(config=config)
 
         params = adapter._merge_options(None, {"temperature": 0.5, "max_tokens": 512})
@@ -352,6 +364,7 @@ class TestBaseAdapterHelpers:
         """测试 _extract_system_prompt"""
         config = ProviderConfig(provider_type="openai", api_key="test-key")
         from agn.adapters.openai import OpenAIAdapter
+
         adapter = OpenAIAdapter(config=config)
 
         messages = [
@@ -369,6 +382,7 @@ class TestBaseAdapterHelpers:
         """测试 _build_messages_with_images 多模态消息构建"""
         config = ProviderConfig(provider_type="openai", api_key="test-key")
         from agn.adapters.openai import OpenAIAdapter
+
         adapter = OpenAIAdapter(config=config)
 
         messages = [
@@ -383,7 +397,10 @@ class TestBaseAdapterHelpers:
         assert len(user_msg["content"]) == 2  # text + image
         assert user_msg["content"][0]["type"] == "text"
         assert user_msg["content"][1]["type"] == "image_url"
-        assert user_msg["content"][1]["image_url"]["url"] == "https://example.com/photo.jpg"
+        assert (
+            user_msg["content"][1]["image_url"]["url"]
+            == "https://example.com/photo.jpg"
+        )
         assert user_msg["content"][1]["image_url"]["detail"] == "high"
 
 
@@ -413,7 +430,9 @@ class TestUnifiedUsageExample:
 
         # Anthropic 通过映射后参数名会变化
         anthropic_kwargs = ANTHROPIC_MAPPING.apply(common_options.to_kwargs())
-        assert anthropic_kwargs["thinking"]["type"] == "enabled"  # 自动映射为 Anthropic 的 thinking 格式
+        assert (
+            anthropic_kwargs["thinking"]["type"] == "enabled"
+        )  # 自动映射为 Anthropic 的 thinking 格式
         assert anthropic_kwargs["temperature"] == 0.7
         assert anthropic_kwargs["max_tokens"] == 2048
 

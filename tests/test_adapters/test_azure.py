@@ -40,7 +40,9 @@ class TestAzureAdapter:
 
     def test_adapter_base_url(self, adapter: AzureAdapter) -> None:
         """测试 Base URL 构建"""
-        expected_url = "https://test-resource.openai.azure.com/openai/deployments/test-deployment"
+        expected_url = (
+            "https://test-resource.openai.azure.com/openai/deployments/test-deployment"
+        )
         assert adapter.base_url == expected_url
 
     def test_adapter_init_with_base_url(self, mock_api_key: str) -> None:
@@ -131,7 +133,10 @@ class TestAzureAdapterChatMockHTTP:
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": "Hello! How can I help you?"},
+                    "message": {
+                        "role": "assistant",
+                        "content": "Hello! How can I help you?",
+                    },
                     "finish_reason": "stop",
                 }
             ],
@@ -269,7 +274,10 @@ class TestAzureAdapterImageMockHTTP:
 
             # 验证请求 URL
             call_args = mock_post.call_args
-            assert "image" in str(call_args).lower() or "generation" in str(call_args).lower()
+            assert (
+                "image" in str(call_args).lower()
+                or "generation" in str(call_args).lower()
+            )
 
         await adapter.close()
 
@@ -282,9 +290,7 @@ class TestAzureAdapterImageMockHTTP:
 
         mock_result = {
             "created": 1700000000,
-            "data": [
-                {"url": "https://cdn.example.com/image.png"}
-            ],
+            "data": [{"url": "https://cdn.example.com/image.png"}],
         }
 
         with patch.object(

@@ -100,24 +100,32 @@ class TestKlingAdapterStatusMapping:
 
     def test_map_pending_status(self) -> None:
         """测试 pending 状态映射"""
-        adapter = KlingAdapter(config=ProviderConfig(provider_type="kling", api_key="test"))
+        adapter = KlingAdapter(
+            config=ProviderConfig(provider_type="kling", api_key="test")
+        )
         assert adapter._map_kling_status("submitted") == "pending"
         assert adapter._map_kling_status("queued") == "pending"
 
     def test_map_processing_status(self) -> None:
         """测试 processing 状态映射"""
-        adapter = KlingAdapter(config=ProviderConfig(provider_type="kling", api_key="test"))
+        adapter = KlingAdapter(
+            config=ProviderConfig(provider_type="kling", api_key="test")
+        )
         assert adapter._map_kling_status("processing") == "processing"
 
     def test_map_success_status(self) -> None:
         """测试 success 状态映射"""
-        adapter = KlingAdapter(config=ProviderConfig(provider_type="kling", api_key="test"))
+        adapter = KlingAdapter(
+            config=ProviderConfig(provider_type="kling", api_key="test")
+        )
         assert adapter._map_kling_status("succeed") == "success"
         assert adapter._map_kling_status("success") == "success"
 
     def test_map_failed_status(self) -> None:
         """测试 failed 状态映射"""
-        adapter = KlingAdapter(config=ProviderConfig(provider_type="kling", api_key="test"))
+        adapter = KlingAdapter(
+            config=ProviderConfig(provider_type="kling", api_key="test")
+        )
         assert adapter._map_kling_status("failed") == "failed"
         assert adapter._map_kling_status("error") == "failed"
 
@@ -150,7 +158,7 @@ class TestKlingAdapterVideoMockHTTP:
             "data": {
                 "task_id": "vid-abc123",
                 "task_status": "submitted",
-            }
+            },
         }
 
         with patch.object(
@@ -188,7 +196,7 @@ class TestKlingAdapterVideoMockHTTP:
             "data": {
                 "task_id": "vid-xyz789",
                 "task_status": "submitted",
-            }
+            },
         }
 
         with patch.object(
@@ -229,7 +237,7 @@ class TestKlingAdapterVideoMockHTTP:
             "data": {
                 "task_id": "vid-img2vid-001",
                 "task_status": "submitted",
-            }
+            },
         }
 
         with patch.object(
@@ -268,7 +276,7 @@ class TestKlingAdapterVideoMockHTTP:
                 "task_status": "submitted",
                 "created_at": 1700000000,
                 "updated_at": 1700000100,
-            }
+            },
         }
 
         with patch.object(
@@ -298,7 +306,7 @@ class TestKlingAdapterVideoMockHTTP:
                 "task_status": "processing",
                 "created_at": 1700000000,
                 "updated_at": 1700000200,
-            }
+            },
         }
 
         with patch.object(
@@ -324,13 +332,11 @@ class TestKlingAdapterVideoMockHTTP:
                 "task_id": "vid-abc123",
                 "task_status": "succeed",
                 "task_result": {
-                    "videos": [
-                        {"url": "https://cdn.example.com/video.mp4"}
-                    ]
+                    "videos": [{"url": "https://cdn.example.com/video.mp4"}]
                 },
                 "created_at": 1700000000,
                 "updated_at": 1700000300,
-            }
+            },
         }
 
         with patch.object(
@@ -359,7 +365,7 @@ class TestKlingAdapterVideoMockHTTP:
                 "task_status_msg": "Insufficient credits",
                 "created_at": 1700000000,
                 "updated_at": 1700000300,
-            }
+            },
         }
 
         with patch.object(

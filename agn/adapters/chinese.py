@@ -367,7 +367,7 @@ class OpenAICompatibleAudioMixin(ABC):
         self,
         model: str,
         input: str,
-        voice: str,
+        voice: str | list[str],
         **kwargs: Any,
     ) -> SpeechResult:
         """
@@ -382,6 +382,9 @@ class OpenAICompatibleAudioMixin(ABC):
         Returns:
             语音合成结果
         """
+        # 非 EdgeTTS 适配器不实现 voice list fallback，收到列表时取第一个元素
+        if isinstance(voice, list):
+            voice = voice[0] if voice else ""
         client = self._get_client()
 
         payload: dict[str, Any] = {

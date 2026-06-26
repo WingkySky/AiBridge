@@ -527,7 +527,7 @@ class BaseAdapter(ABC):
         self,
         model: str,
         input: str,
-        voice: str,
+        voice: str | list[str],
         **kwargs: Any,
     ) -> "SpeechResult":
         """
@@ -536,7 +536,7 @@ class BaseAdapter(ABC):
         Args:
             model: 模型名称
             input: 要合成的文本
-            voice: 音色
+            voice: 音色，支持单个音色字符串或音色列表（列表时启用 fallback 降级）
             **kwargs: 其他参数（response_format, speed 等）
 
         Returns:
@@ -657,6 +657,64 @@ class BaseAdapter(ABC):
             模型信息列表
         """
         pass
+
+    # ==================== 音色查询（TTS Provider 可选实现）====================
+
+    async def list_voices(
+        self,
+        language: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        列出可用音色
+
+        TTS Provider 可覆盖此方法返回真实音色列表。默认抛出不支持异常。
+
+        Args:
+            language: 按语言过滤，如 "zh-CN" / "en-US"
+
+        Returns:
+            音色列表，每项为 dict（字段因 Provider 而异）
+
+        Raises:
+            UnsupportedCapabilityError: Provider 不支持音色查询
+        """
+        from agn.core.errors import UnsupportedCapabilityError
+
+        raise UnsupportedCapabilityError(
+            message=f"Provider '{self.provider_type}' does not support list_voices",
+            details={"capability": "list_voices", "provider": self.provider_type},
+        )
+
+    async def recommend_voices(
+        self,
+        language: str | None = None,
+        gender: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        推荐可用音色
+
+        在 list_voices() 基础上按语言/性别过滤并返回推荐列表。
+        TTS Provider 可覆盖此方法提供更智能的推荐。默认实现基于 list_voices 过滤。
+
+        Args:
+            language: 按语言过滤，如 "zh-CN" / "en-US"
+            gender: 按性别过滤，如 "female" / "male"（不区分大小写）
+            limit: 最多返回条数
+
+        Returns:
+            推荐音色列表
+
+        Raises:
+            UnsupportedCapabilityError: Provider 不支持音色查询
+        """
+        voices = await self.list_voices(language=language)
+        if gender:
+            gender_lower = gender.lower()
+            voices = [
+                v for v in voices if str(v.get("Gender", "")).lower() == gender_lower
+            ]
+        return voices[:limit]
 
     # ==================== 能力检查 ====================
 

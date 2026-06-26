@@ -181,8 +181,7 @@ class TestAnthropicAdapterChatMock:
             assert len(result.choices) == 1
             assert result.choices[0].message.role == "assistant"
             assert (
-                result.choices[0].message.content
-                == "Hello! How can I help you today?"
+                result.choices[0].message.content == "Hello! How can I help you today?"
             )
             assert result.choices[0].finish_reason == "stop"
             assert result.usage is not None

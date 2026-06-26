@@ -2,10 +2,13 @@
 AGN-SDK 客户端测试
 """
 
+from typing import Any
+from unittest.mock import AsyncMock
+
 import pytest
 
 from agn import Client
-from agn.core.errors import ValidationError
+from agn.core.errors import UnsupportedCapabilityError, ValidationError
 
 
 class TestClient:
@@ -87,3 +90,82 @@ class TestClientMessages:
         client = Client(provider="agnes", api_key=mock_api_key)
         normalized = client._normalize_messages([])
         assert normalized == []
+
+
+class TestClientVoices:
+    """Client.list_voices / recommend_voices 统一入口测试"""
+
+    @pytest.mark.asyncio
+    async def test_list_voices_passes_through_to_adapter(self) -> None:
+        """测试 list_voices 透传给 adapter 并原样返回结果"""
+        client = Client(provider="edge-tts")
+        # 替换 adapter.list_voices 为 AsyncMock
+        client._adapter.list_voices = AsyncMock(  # type: ignore[method-assign]
+            return_value=[{"ShortName": "zh-CN-XiaoxiaoNeural"}]
+        )
+
+        result = await client.list_voices(language="zh-CN")
+
+        client._adapter.list_voices.assert_awaited_once_with(language="zh-CN")
+        assert result == [{"ShortName": "zh-CN-XiaoxiaoNeural"}]
+
+    @pytest.mark.asyncio
+    async def test_recommend_voices_passes_through_to_adapter(self) -> None:
+        """测试 recommend_voices 透传给 adapter 并原样返回结果"""
+        client = Client(provider="edge-tts")
+        client._adapter.recommend_voices = AsyncMock(  # type: ignore[method-assign]
+            return_value=[{"ShortName": "zh-CN-XiaoxiaoNeural", "Gender": "Female"}]
+        )
+
+        result = await client.recommend_voices(
+            language="zh-CN", gender="female", limit=5
+        )
+
+        client._adapter.recommend_voices.assert_awaited_once_with(
+            language="zh-CN", gender="female", limit=5
+        )
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_voices_propagates_unsupported(self) -> None:
+        """测试 Provider 不支持 list_voices 时异常透传到 Client 层"""
+        # ElevenLabs 未覆盖 list_voices，应抛 UnsupportedCapabilityError
+        client = Client(provider="elevenlabs", api_key="test-key")
+        with pytest.raises(UnsupportedCapabilityError):
+            await client.list_voices()
+
+    @pytest.mark.asyncio
+    async def test_speech_accepts_voice_list(self) -> None:
+        """测试 Client.speech 接受 voice 列表并透传给 adapter"""
+        client = Client(provider="edge-tts")
+        client._adapter.speech = AsyncMock(  # type: ignore[method-assign]
+            return_value="speech-result"  # 简化返回值，仅验证透传
+        )
+
+        await client.speech(
+            model="edge-tts",
+            input="测试",
+            voice=["zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"],
+        )
+
+        client._adapter.speech.assert_awaited_once()
+        call_kwargs = client._adapter.speech.call_args.kwargs
+        assert call_kwargs["voice"] == ["zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"]
+
+    @pytest.mark.asyncio
+    async def test_speech_accepts_single_voice(self) -> None:
+        """测试 Client.speech 仍兼容单 voice 字符串"""
+        client = Client(provider="edge-tts")
+        client._adapter.speech = AsyncMock(  # type: ignore[method-assign]
+            return_value=Any  # 仅验证透传，不关心返回值
+        )
+
+        await client.speech(
+            model="edge-tts",
+            input="测试",
+            voice="zh-CN-XiaoxiaoNeural",
+        )
+
+        client._adapter.speech.assert_awaited_once()
+        call_kwargs = client._adapter.speech.call_args.kwargs
+        assert call_kwargs["voice"] == "zh-CN-XiaoxiaoNeural"

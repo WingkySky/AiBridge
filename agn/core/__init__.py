@@ -13,9 +13,11 @@ from agn.core.errors import (
     NetworkError,
     ProviderNotFoundError,
     RateLimitError,
+    ServiceUnavailableError,
     TimeoutError,
     UnsupportedCapabilityError,
     ValidationError,
+    VoiceNotAvailableError,
     map_http_status_to_error,
 )
 
@@ -28,9 +30,11 @@ __all__ = [
     "NetworkError",
     "ProviderNotFoundError",
     "RateLimitError",
+    "ServiceUnavailableError",
     "TimeoutError",
     "UnsupportedCapabilityError",
     "ValidationError",
+    "VoiceNotAvailableError",
     "map_http_status_to_error",
     # 配置
     "Config",

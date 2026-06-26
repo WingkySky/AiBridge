@@ -155,6 +155,38 @@ class UnsupportedCapabilityError(AGNError):
         super().__init__(message, code, details, original_error)
 
 
+class VoiceNotAvailableError(AGNError):
+    """音色不可用错误 - 请求的 voice 已下线或不存在，重试无意义，应换音色
+
+    典型场景：edge-tts 服务端下线了某个 voice，list_voices() 中查不到。
+    """
+
+    def __init__(
+        self,
+        message: str = "Voice not available",
+        code: str = "VOICE_NOT_AVAILABLE",
+        details: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
+    ) -> None:
+        super().__init__(message, code, details, original_error)
+
+
+class ServiceUnavailableError(AGNError):
+    """服务不可用错误 - Provider 服务端临时不可用（限流/抖动），可重试
+
+    典型场景：edge-tts 服务端限流导致返回空音频，但 voice 本身仍有效。
+    """
+
+    def __init__(
+        self,
+        message: str = "Service temporarily unavailable",
+        code: str = "SERVICE_UNAVAILABLE",
+        details: dict[str, Any] | None = None,
+        original_error: Exception | None = None,
+    ) -> None:
+        super().__init__(message, code, details, original_error)
+
+
 def map_http_status_to_error(status_code: int, response_body: Any = None) -> AGNError:
     """
     将 HTTP 状态码映射到对应的错误类型

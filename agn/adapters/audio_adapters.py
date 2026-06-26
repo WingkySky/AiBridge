@@ -19,10 +19,13 @@ import httpx
 from agn.adapters.base import BaseAdapter, Capabilities
 from agn.adapters.factory import AdapterFactory
 from agn.core.errors import (
+    AGNError,
     APIError,
     AuthenticationError,
     RateLimitError,
+    ServiceUnavailableError,
     UnsupportedCapabilityError,
+    VoiceNotAvailableError,
 )
 from agn.models.audio import (
     SpeechResult,
@@ -160,7 +163,7 @@ class ElevenLabsAdapter(BaseAdapter):
         self,
         model: str,
         input: str,
-        voice: str = "Rachel",
+        voice: str | list[str] = "Rachel",
         **kwargs: Any,
     ) -> SpeechResult:
         """
@@ -181,6 +184,9 @@ class ElevenLabsAdapter(BaseAdapter):
         Returns:
             SpeechResult 包含音频二进制数据
         """
+        # 非 EdgeTTS 适配器不实现 voice list fallback，收到列表时取第一个元素
+        if isinstance(voice, list):
+            voice = voice[0] if voice else ""
         client = self._get_client()
         voice_id = self._get_voice_id(voice)
 
@@ -736,7 +742,7 @@ class DeepgramAdapter(BaseAdapter):
         self,
         model: str,
         input: str,
-        voice: str = "",
+        voice: str | list[str] = "",
         **kwargs: Any,
     ) -> SpeechResult:
         """Deepgram Aura TTS（如果需要可以后续扩展），当前版本仅支持 ASR"""
@@ -1303,7 +1309,7 @@ class AssemblyAIAdapter(BaseAdapter):
         self,
         model: str,
         input: str,
-        voice: str = "",
+        voice: str | list[str] = "",
         **kwargs: Any,
     ) -> SpeechResult:
         """AssemblyAI 专注 ASR，不提供 TTS"""
@@ -1487,7 +1493,7 @@ class CartesiaAdapter(BaseAdapter):
         self,
         model: str,
         input: str,
-        voice: str = "Generic Woman",
+        voice: str | list[str] = "Generic Woman",
         **kwargs: Any,
     ) -> SpeechResult:
         """
@@ -1510,6 +1516,9 @@ class CartesiaAdapter(BaseAdapter):
         Returns:
             SpeechResult
         """
+        # 非 EdgeTTS 适配器不实现 voice list fallback，收到列表时取第一个元素
+        if isinstance(voice, list):
+            voice = voice[0] if voice else ""
         client = self._get_client()
         voice_id = kwargs.get("voice_id") or self._get_voice_id(voice)
 
@@ -1728,6 +1737,9 @@ class EdgeTTSAdapter(BaseAdapter):
     # Edge TTS 基于微软免费神经语音服务，无需 API Key 认证
     requires_api_key = False
 
+    # 音色列表缓存（类级共享，避免每次空音频都网络查询 list_voices）
+    _voices_cache: list[dict[str, Any]] | None = None
+
     DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
 
     COMMON_VOICES = {
@@ -1870,18 +1882,23 @@ class EdgeTTSAdapter(BaseAdapter):
         self,
         model: str,
         input: str,
-        voice: str = "",
+        voice: str | list[str] = "",
         **kwargs: Any,
     ) -> SpeechResult:
         """
         文字转语音 (Edge TTS)
 
+        支持音色降级：当 voice 传入列表时，按顺序逐个尝试，
+        某个音色失败（VoiceNotAvailableError / ServiceUnavailableError）
+        会自动切换到下一个，直到成功或全部失败。
+
         Args:
             model: 模型标识（Edge TTS 只有一个模型，传入任意值都用 edge-tts）
             input: 要合成的文本
-            voice: 音色名称或完整 voice ID
+            voice: 音色名称、完整 voice ID，或候选音色列表（用于自动降级）
                 支持简称: xiaoxiao/晓晓/yunxi/云希/jenny/nanami 等 40+ 预设
                 支持完整ID: zh-CN-XiaoxiaoNeural
+                支持列表: ["zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural"]
             **kwargs: 其他参数
                 - rate: str 语速 "+0%" / "-20%" / "+50%"
                 - pitch: str 音调 "+0Hz" / "+200Hz" / "-50Hz"
@@ -1892,9 +1909,81 @@ class EdgeTTSAdapter(BaseAdapter):
 
         Returns:
             SpeechResult
+
+        Raises:
+            VoiceNotAvailableError: 列表中所有 voice 都不存在/已下线
+            ServiceUnavailableError: 服务端临时不可用且无可用降级 voice
+        """
+        # 规范化为候选列表：列表传入即用；字符串传入包装为单元素列表；
+        # 空值/空列表兜底为 [""]，由 _resolve_voice 走默认音色
+        if isinstance(voice, list):
+            voice_candidates = voice if voice else [""]
+        else:
+            voice_candidates = [voice]
+
+        last_error: AGNError | None = None
+        for idx, v in enumerate(voice_candidates):
+            voice_id = self._resolve_voice(v)
+            try:
+                return await self._speech_single(
+                    model=model,
+                    input=input,
+                    voice_id=voice_id,
+                    **kwargs,
+                )
+            except (VoiceNotAvailableError, ServiceUnavailableError) as e:
+                # 记录最后一个失败异常，便于全部失败时抛出
+                last_error = e
+                # 列表 fallback 模式：当前 voice 失败时尝试下一个
+                if len(voice_candidates) > 1:
+                    logger.warning(
+                        "Edge TTS voice %s 合成失败（%s），尝试下一个候选 voice (%d/%d)",
+                        voice_id,
+                        type(e).__name__,
+                        idx + 1,
+                        len(voice_candidates),
+                    )
+                    continue
+                # 单 voice 模式：直接抛当前异常
+                raise
+
+        # 所有候选 voice 都失败：抛出最后一个异常（理论必经此处）
+        if last_error is not None:
+            raise last_error
+        # 理论不可达（voice_candidates 至少有一个元素）
+        raise APIError(
+            message="Edge TTS 语音合成失败，无可用 voice",
+            code="NO_VOICE_AVAILABLE",
+        )
+
+    async def _speech_single(
+        self,
+        model: str,
+        input: str,
+        voice_id: str,
+        **kwargs: Any,
+    ) -> SpeechResult:
+        """
+        单 voice 合成内部实现（不含 fallback 逻辑）
+
+        空音频时主动查询 list_voices 区分异常语义：
+        - voice 仍在线 → ServiceUnavailableError（服务端临时问题，可重试）
+        - voice 已下线 → VoiceNotAvailableError（重试无意义，应换音色）
+
+        Args:
+            model: 模型标识
+            input: 要合成的文本
+            voice_id: 已解析的完整 voice ID（如 zh-CN-XiaoxiaoNeural）
+            **kwargs: 其他参数（rate/pitch/volume/output_format/proxy 等）
+
+        Returns:
+            SpeechResult
+
+        Raises:
+            VoiceNotAvailableError: voice 不在线
+            ServiceUnavailableError: 服务端临时不可用
         """
         edge_tts = self._get_edge_tts()
-        voice_id = self._resolve_voice(voice)
         edge_fmt, content_type = self._get_output_format(kwargs.get("output_format"))
 
         communicate_kwargs: dict[str, Any] = {
@@ -1902,6 +1991,7 @@ class EdgeTTSAdapter(BaseAdapter):
             "voice": voice_id,
         }
 
+        # 透传 edge-tts 支持的可选参数
         if "rate" in kwargs:
             communicate_kwargs["rate"] = kwargs["rate"]
         if "pitch" in kwargs:
@@ -1923,11 +2013,26 @@ class EdgeTTSAdapter(BaseAdapter):
         audio_data = b"".join(audio_chunks)
 
         # 空音频检测：edge-tts 服务端未返回音频时（参数错误/特殊字符/限流未抛异常等）
-        # 不应静默返回空结果，否则调用方只能靠文件大小事后发现
+        # 主动查询 list_voices 区分语义，便于上层决策"换音色"还是"等一下重试"
         if not audio_data:
-            raise APIError(
-                message="Edge TTS 返回空音频，请检查文本参数、音色或网络状况",
-                code="NO_AUDIO_RECEIVED",
+            if await self._check_voice_available(voice_id):
+                # voice 在线但返回空音频 → 服务端临时不可用（限流/抖动），可重试
+                raise ServiceUnavailableError(
+                    message=(
+                        f"Edge TTS 服务端返回空音频（voice={voice_id} 仍在线），"
+                        "可能是限流或网络抖动，可重试"
+                    ),
+                    code="NO_AUDIO_RECEIVED",
+                    details={
+                        "provider": self.provider_type,
+                        "voice": voice_id,
+                        "text_length": len(input),
+                    },
+                )
+            # voice 不在线 → 已下线/不存在，重试无意义
+            raise VoiceNotAvailableError(
+                message=(f"Edge TTS 音色 {voice_id} 已下线或不存在，请更换音色"),
+                code="VOICE_NOT_AVAILABLE",
                 details={
                     "provider": self.provider_type,
                     "voice": voice_id,
@@ -1935,6 +2040,7 @@ class EdgeTTSAdapter(BaseAdapter):
                 },
             )
 
+        # 输出格式后缀推断（kwargs.output_format 可能是 None，默认 mp3）
         fmt_ext = "mp3"
         of = kwargs.get("output_format", "mp3")
         if isinstance(of, str):
@@ -1966,7 +2072,7 @@ class EdgeTTSAdapter(BaseAdapter):
 
     async def list_voices(self, language: str | None = None) -> list[dict[str, Any]]:
         """
-        列出 Edge TTS 可用语音列表
+        列出 Edge TTS 可用语音列表（带类级缓存）
 
         Args:
             language: 按语言过滤，如 "zh-CN" / "en-US" / "ja-JP"
@@ -1974,11 +2080,56 @@ class EdgeTTSAdapter(BaseAdapter):
         Returns:
             语音列表，每项包含 Name、ShortName、Locale、Gender 等
         """
-        edge_tts = self._get_edge_tts()
-        voices: list[dict[str, Any]] = await edge_tts.list_voices()
+        # 缓存未命中时从服务端拉取（全量列表缓存，language 过滤在返回前做）
+        if self._voices_cache is None:
+            edge_tts = self._get_edge_tts()
+            self._voices_cache = await edge_tts.list_voices()
+        voices = self._voices_cache
         if language:
             voices = [v for v in voices if v.get("Locale", "").startswith(language)]
         return voices
+
+    async def recommend_voices(
+        self,
+        language: str | None = None,
+        gender: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        推荐可用音色（按语言/性别过滤）
+
+        Args:
+            language: 按语言过滤，如 "zh-CN" / "en-US"
+            gender: 按性别过滤，如 "female" / "male"（不区分大小写）
+            limit: 最多返回条数
+
+        Returns:
+            推荐音色列表，每项含 ShortName（可直接传给 speech 的 voice 参数）
+        """
+        voices = await self.list_voices(language=language)
+        if gender:
+            gender_lower = gender.lower()
+            voices = [
+                v for v in voices if str(v.get("Gender", "")).lower() == gender_lower
+            ]
+        return voices[:limit]
+
+    async def _check_voice_available(self, voice_id: str) -> bool:
+        """
+        检查指定 voice 是否在可用音色列表中（用于空音频时区分异常语义）
+
+        Args:
+            voice_id: 完整 voice ID，如 "zh-CN-XiaoxiaoNeural"
+
+        Returns:
+            True 表示 voice 仍可用，False 表示已下线/不存在
+        """
+        try:
+            voices = await self.list_voices()
+            return any(v.get("ShortName") == voice_id for v in voices)
+        except Exception:
+            # list_voices 查询本身失败时，无法判断，保守返回 True（按服务端问题处理）
+            return True
 
     async def chat(self, model: str, messages: list[ChatMessage], **kwargs: Any) -> Any:
         raise UnsupportedCapabilityError(

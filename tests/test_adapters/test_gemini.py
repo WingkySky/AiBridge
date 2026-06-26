@@ -178,7 +178,10 @@ class TestGeminiAdapterChat:
             assert body["contents"][0]["role"] == "user"
             assert body["contents"][0]["parts"][0]["text"] == "Hello!"
             assert "systemInstruction" in body
-            assert body["systemInstruction"]["parts"][0]["text"] == "You are a helpful assistant."
+            assert (
+                body["systemInstruction"]["parts"][0]["text"]
+                == "You are a helpful assistant."
+            )
 
             from agn.models.chat import ChatCompletion
 
@@ -186,7 +189,9 @@ class TestGeminiAdapterChat:
             assert result.model == "gemini-2.5-pro"
             assert len(result.choices) == 1
             assert result.choices[0].message.role == "assistant"
-            assert result.choices[0].message.content == "Hello! How can I help you today?"
+            assert (
+                result.choices[0].message.content == "Hello! How can I help you today?"
+            )
             assert result.choices[0].finish_reason == "stop"
             assert result.usage is not None
             assert result.usage.prompt_tokens == 15
@@ -325,9 +330,7 @@ class TestGeminiAdapterChat:
         await adapter.close()
 
     @pytest.mark.asyncio
-    async def test_chat_multiple_parts(
-        self, adapter: GeminiAdapter
-    ) -> None:
+    async def test_chat_multiple_parts(self, adapter: GeminiAdapter) -> None:
         """测试多 part 响应的拼接解析"""
         await adapter.start()
 
@@ -368,9 +371,7 @@ class TestGeminiAdapterChat:
         await adapter.close()
 
     @pytest.mark.asyncio
-    async def test_chat_empty_candidates(
-        self, adapter: GeminiAdapter
-    ) -> None:
+    async def test_chat_empty_candidates(self, adapter: GeminiAdapter) -> None:
         """测试空 candidates 响应的处理"""
         await adapter.start()
 

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-06-26
+
+### Added
+
+- TTS 音色健康检查 / 推荐：`Client.list_voices()` 和 `Client.recommend_voices(language, gender, limit)` 统一入口，业务层无需自己维护"可用声音池"
+- `BaseAdapter.list_voices` / `recommend_voices` 默认实现（不支持的 Provider 抛 `UnsupportedCapabilityError`）
+- `EdgeTTSAdapter.list_voices` 带类级缓存（`_voices_cache`），避免每次空音频都网络查询
+- `EdgeTTSAdapter.recommend_voices` 覆盖实现，按语言/性别过滤可用音色
+- TTS 音色自动降级：`speech(voice=["XiaoxiaoNeural", "XiaoyiNeural"])` 支持候选列表，第一个失败自动切换到下一个
+- 空音频语义化异常：`EdgeTTSAdapter` 空音频时主动查询 `list_voices` 区分语义
+  - voice 仍在线 → 抛 `ServiceUnavailableError`（服务端临时问题，可重试）
+  - voice 已下线 → 抛 `VoiceNotAvailableError`（重试无意义，应换音色）
+- 新增 `VoiceNotAvailableError` / `ServiceUnavailableError` 标准错误类型
+
+### Changed
+
+- `BaseAdapter.speech` 及所有子类 `speech` 方法的 `voice` 参数从 `str` 改为 `str | list[str]`，支持候选列表降级
+- `Client.speech` 的 `voice` 参数同步改为 `str | list[str]`
+- 非 EdgeTTS 适配器（ElevenLabs / Cartesia / Azure / OpenAI 兼容）收到 voice 列表时取第一个元素（不实现 fallback，但签名兼容）
+
+### Fixed
+
+- 解决 edge-tts 声音被微软下线时上层只能靠文件大小事后发现的空缺：现在 SDK 主动判别 voice 可用性并给出语义化异常，上层可区分"该换声音"还是"该等一下重试"
+
 ## [1.1.1] - 2026-06-26
 
 ### Fixed

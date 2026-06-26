@@ -106,7 +106,10 @@ class TestStabilityAdapterListModels:
         """测试模型能力"""
         models = await adapter.list_models(model_type="image")
         for model in models:
-            assert "text2image" in model.capabilities or "image2image" in model.capabilities
+            assert (
+                "text2image" in model.capabilities
+                or "image2image" in model.capabilities
+            )
 
 
 class TestStabilityAdapterStatusMapping:
@@ -127,7 +130,9 @@ class TestStabilityAdapterStatusMapping:
     def test_adapter_custom_engine(self, mock_api_key: str) -> None:
         """测试自定义引擎配置"""
         config = ProviderConfig(provider_type="stability", api_key=mock_api_key)
-        adapter = StabilityAdapter(config=config, default_engine="stable-diffusion-3-medium")
+        adapter = StabilityAdapter(
+            config=config, default_engine="stable-diffusion-3-medium"
+        )
         assert adapter.default_engine == "stable-diffusion-3-medium"
 
 
@@ -157,7 +162,9 @@ class TestStabilityAdapterImageGenerateMockHTTP:
 
         mock_result = {
             "artifacts": [
-                {"base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}
+                {
+                    "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                }
             ]
         }
 
@@ -188,7 +195,9 @@ class TestStabilityAdapterImageGenerateMockHTTP:
 
         mock_result = {
             "artifacts": [
-                {"base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="}
+                {
+                    "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                }
             ]
         }
 

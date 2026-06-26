@@ -138,11 +138,13 @@ class TestGeminiAdapter:
 
     def test_generation_config(self, adapter: GeminiAdapter) -> None:
         """测试生成配置转换"""
-        config = adapter._convert_generation_config({
-            "temperature": 0.7,
-            "top_p": 0.9,
-            "max_tokens": 1000,
-        })
+        config = adapter._convert_generation_config(
+            {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "max_tokens": 1000,
+            }
+        )
         assert config["temperature"] == 0.7
         assert config["topP"] == 0.9
         assert config["maxOutputTokens"] == 1000

@@ -438,7 +438,7 @@ class Client:
         self,
         model: str,
         input: str,
-        voice: str,
+        voice: str | list[str],
         response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3",
         speed: float | None = None,
         options: SpeechOptions | None = None,
@@ -447,10 +447,13 @@ class Client:
         """
         文字转语音（TTS）
 
+        支持 voice 候选列表自动降级（当适配器实现支持时，如 Edge TTS）：
+        传入 list[str] 后，第一个音色失败会自动切换到下一个。
+
         Args:
             model: 模型名称（如 'tts-1'、'tts-1-hd'）
             input: 要合成的文本
-            voice: 音色（如 'alloy'、'echo'、'nova'）
+            voice: 音色（如 'alloy'、'echo'、'nova'），或候选音色列表用于自动降级
             response_format: 音频输出格式
             speed: 语速（0.25-4.0）
             options: 统一语音合成选项（优先级高于独立参数）
@@ -492,6 +495,59 @@ class Client:
             模型信息列表
         """
         return await self._adapter.list_models(model_type=model_type)
+
+    # ==================== 音色信息 ====================
+
+    async def list_voices(
+        self,
+        language: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        获取 Provider 可用音色列表
+
+        用于业务层维护"可用声音池"，避免使用已被 Provider 下线的音色。
+        Provider 不支持时抛 UnsupportedCapabilityError。
+
+        Args:
+            language: 按语言过滤，如 "zh-CN" / "en-US"（Provider 实现决定匹配规则）
+
+        Returns:
+            音色信息列表，每项为 dict，常见字段：ShortName / Name / Locale / Gender
+            （具体字段因 Provider 而异）
+
+        Raises:
+            UnsupportedCapabilityError: 当前 Provider 不支持 list_voices
+        """
+        return await self._adapter.list_voices(language=language)
+
+    async def recommend_voices(
+        self,
+        language: str | None = None,
+        gender: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        推荐可用音色（按语言/性别过滤）
+
+        业务层可直接把返回结果中的 ShortName/voice_id 传给 speech() 的 voice 参数，
+        无需自己维护可用性逻辑。Provider 不支持时抛 UnsupportedCapabilityError。
+
+        Args:
+            language: 按语言过滤，如 "zh-CN" / "en-US"
+            gender: 按性别过滤，如 "female" / "male"（不区分大小写）
+            limit: 最多返回条数
+
+        Returns:
+            推荐音色列表
+
+        Raises:
+            UnsupportedCapabilityError: 当前 Provider 不支持 list_voices
+        """
+        return await self._adapter.recommend_voices(
+            language=language,
+            gender=gender,
+            limit=limit,
+        )
 
     # ==================== 辅助方法 ====================
 
