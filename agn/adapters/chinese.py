@@ -453,7 +453,7 @@ class QwenAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         """
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -790,7 +790,7 @@ class ZhipuAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -1052,7 +1052,7 @@ class DoubaoAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -1390,7 +1390,7 @@ class ErnieAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         # api_key 可以直接是 access_token，也可以是 ak:sk 格式
         self.secret_key = ""
         if ":" in self.api_key:
@@ -1689,7 +1689,7 @@ class KimiAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -2005,7 +2005,7 @@ class MiniMaxAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self.group_id: str | None = getattr(config, "group_id", None)
         self._http_client: httpx.AsyncClient | None = None
 

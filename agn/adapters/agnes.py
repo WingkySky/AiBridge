@@ -82,7 +82,7 @@ class AgnesAdapter(BaseAdapter):
         super().__init__(config)
         self.base_url = config.base_url or DEFAULT_BASE_URL
         self.poll_url = config.poll_url
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: AsyncHttpClient | None = None
 
         # 预定义的模型列表（实际应该从 API 获取）

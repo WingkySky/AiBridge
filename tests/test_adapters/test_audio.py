@@ -2537,6 +2537,18 @@ class TestEdgeTTSAdapter:
         assert self.adapter.provider_type == "edge-tts"
         assert self.adapter.provider_name == "Edge TTS"
 
+    def test_adapter_requires_no_api_key(self):
+        """测试 Edge TTS 标记为免费 Provider，无需 API Key"""
+        assert self.adapter.requires_api_key is False
+
+    def test_adapter_init_without_api_key(self):
+        """测试 Edge TTS 不传 api_key 也能创建适配器"""
+        config = ProviderConfig(provider_type="edge-tts")
+        adapter = EdgeTTSAdapter(config=config)
+        # api_key 为 None，适配器仍可正常创建
+        assert adapter.config.api_key is None
+        assert adapter.requires_api_key is False
+
     def test_default_voice_is_chinese(self):
         """测试默认音色是中文晓晓"""
         assert self.adapter.DEFAULT_VOICE == "zh-CN-XiaoxiaoNeural"

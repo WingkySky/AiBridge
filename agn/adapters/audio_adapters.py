@@ -115,7 +115,7 @@ class ElevenLabsAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -441,7 +441,7 @@ class DeepgramAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -1018,7 +1018,7 @@ class AssemblyAIAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -1447,7 +1447,7 @@ class CartesiaAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self.api_version = (
             getattr(config, "api_version", None) or self.DEFAULT_API_VERSION
         )
@@ -1725,6 +1725,8 @@ class EdgeTTSAdapter(BaseAdapter):
     supported_capabilities = [
         Capabilities.AUDIO_SPEECH,
     ]
+    # Edge TTS 基于微软免费神经语音服务，无需 API Key 认证
+    requires_api_key = False
 
     DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
 

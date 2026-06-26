@@ -55,7 +55,7 @@ class PikaAdapter(BaseAdapter):
         """
         super().__init__(config)
         self.base_url = config.base_url or DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -242,7 +242,11 @@ class PikaAdapter(BaseAdapter):
             or data.get("url")
             or (data.get("output") or {}).get("video_url")
             or (data.get("output") or {}).get("url")
-            or (((data.get("results") or [{}])[0]).get("url") if data.get("results") else None)
+            or (
+                ((data.get("results") or [{}])[0]).get("url")
+                if data.get("results")
+                else None
+            )
         )
 
         # 提取错误信息

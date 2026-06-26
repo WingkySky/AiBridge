@@ -65,7 +65,7 @@ class GeminiAdapter(BaseAdapter):
         """
         super().__init__(config)
         self.base_url = config.base_url or DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -363,7 +363,10 @@ class GeminiAdapter(BaseAdapter):
         else:
             requests = []
             for text in texts:
-                req = {"model": f"models/{embed_model}", "content": {"parts": [{"text": text}]}}
+                req = {
+                    "model": f"models/{embed_model}",
+                    "content": {"parts": [{"text": text}]},
+                }
                 if output_dimensionality := kwargs.get("output_dimensionality"):
                     req["outputDimensionality"] = output_dimensionality
                 requests.append(req)

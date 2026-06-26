@@ -24,6 +24,20 @@ class TestClient:
         assert client.provider_type == "agnes"
         assert client.config.api_key == mock_api_key
 
+    def test_client_init_free_provider_without_api_key(self) -> None:
+        """测试免费 Provider（如 Edge TTS）不传 API Key 也能初始化"""
+        # Edge TTS 标记 requires_api_key=False，应跳过校验
+        client = Client(provider="edge-tts")
+        assert client.provider_type == "edge-tts"
+        # api_key 可能为 None 或空串（取决于环境变量），关键是不报错且标记为免费
+        assert client._adapter.requires_api_key is False
+
+    def test_client_init_free_provider_with_empty_api_key(self) -> None:
+        """测试免费 Provider 传空 API Key 也能初始化"""
+        client = Client(provider="edge-tts", api_key="")
+        assert client.provider_type == "edge-tts"
+        assert client._adapter.requires_api_key is False
+
     def test_client_init_with_base_url(self, mock_api_key: str) -> None:
         """测试自定义 Base URL"""
         custom_url = "https://custom.api.com/v1"

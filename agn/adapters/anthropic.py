@@ -81,7 +81,7 @@ class AnthropicAdapter(BaseAdapter):
         """
         super().__init__(config)
         self.base_url = config.base_url or DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self.api_version = DEFAULT_API_VERSION
         self._http_client: httpx.AsyncClient | None = None
 

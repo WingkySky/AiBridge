@@ -70,7 +70,7 @@ class IdeogramAdapter(BaseAdapter):
         """初始化 Ideogram 适配器"""
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -458,7 +458,7 @@ class LumaAdapter(BaseAdapter):
         """初始化 Luma 适配器"""
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -831,7 +831,7 @@ class LlamaAdapter(BaseAdapter):
         """初始化 Meta Llama 适配器"""
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:

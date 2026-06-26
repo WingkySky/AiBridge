@@ -19,7 +19,8 @@ class ProviderConfig(BaseModel):
     provider_type: str = Field(
         ..., description="Provider 类型标识，如 'agnes'、'openai'"
     )
-    api_key: str = Field(..., description="API Key")
+    # API Key 改为可选：部分 Provider（如 Edge TTS）免费且无需认证
+    api_key: str | None = Field(None, description="API Key（免费 Provider 可不传）")
     base_url: str | None = Field(
         None, description="API Base URL（可选，部分 Provider 有默认值）"
     )

@@ -73,7 +73,7 @@ class SiliconFlowAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -428,7 +428,7 @@ class TogetherAIAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -784,7 +784,7 @@ class FireworksAIAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -1119,7 +1119,7 @@ class CloudflareAIAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self.account_id = config.extra.get("account_id") if config.extra else None
         self._http_client: httpx.AsyncClient | None = None
 

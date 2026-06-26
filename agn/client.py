@@ -99,8 +99,12 @@ class Client:
         # 获取配置（合并环境变量）
         full_config = get_provider_config(provider, config_overrides)
 
-        # 确保有 api_key
-        if not full_config.get("api_key"):
+        # 检查是否需要 API Key：免费 Provider（如 Edge TTS）无需认证
+        adapter_class = AdapterFactory.get_adapter_class(provider)
+        requires_key = (
+            adapter_class.requires_api_key if adapter_class is not None else True
+        )
+        if requires_key and not full_config.get("api_key"):
             raise ValidationError(
                 message=f"API key is required for provider '{provider}'",
                 details={"provider": provider},

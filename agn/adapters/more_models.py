@@ -62,7 +62,7 @@ class DeepSeekAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -353,7 +353,7 @@ class StepFunAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -654,7 +654,7 @@ class MistralAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -958,7 +958,7 @@ class CohereAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -1293,7 +1293,7 @@ class PerplexityAdapter(BaseAdapter):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self.base_url = config.base_url or self.DEFAULT_BASE_URL
-        self.api_key = config.api_key
+        self.api_key = config.api_key or ""
         self._http_client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:

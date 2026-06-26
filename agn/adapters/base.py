@@ -86,6 +86,7 @@ class BaseAdapter(ABC):
         provider_name: Provider 显示名称
         supported_capabilities: 支持的能力列表（使用 Capabilities 常量）
         param_mapping: 参数映射规则（默认 OpenAI 兼容）
+        requires_api_key: 是否需要 API Key（免费 Provider 如 Edge TTS 设为 False）
     """
 
     # 类变量：由子类覆盖
@@ -93,6 +94,8 @@ class BaseAdapter(ABC):
     provider_name: ClassVar[str] = ""
     supported_capabilities: ClassVar[list[str]] = []
     param_mapping: ClassVar[ParameterMapping] = OPENAI_COMPATIBLE_MAPPING
+    # 是否需要 API Key：免费 Provider（如 Edge TTS）设为 False 即可免认证使用
+    requires_api_key: ClassVar[bool] = True
 
     def __init__(self, config: "ProviderConfig") -> None:
         """
@@ -102,6 +105,9 @@ class BaseAdapter(ABC):
             config: Provider 配置对象
         """
         self.config = config
+        # api_key 兜底为 str：requires_api_key=True 时 Client 已保证非 None，
+        # requires_api_key=False 的适配器（如 Edge TTS）不使用此字段，空串不影响
+        self.api_key: str = config.api_key or ""
         self._client: Any | None = None  # HTTP 客户端，由子类初始化
 
     @abstractmethod
