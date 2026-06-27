@@ -85,9 +85,6 @@ class AgnesAdapter(BaseAdapter):
         self.api_key = config.api_key or ""
         self._http_client: AsyncHttpClient | None = None
 
-        # 预定义的模型列表（实际应该从 API 获取）
-        self._models_cache: list[ModelInfo] | None = None
-
     async def start(self) -> None:
         """启动适配器"""
         self._http_client = AsyncHttpClient(
@@ -557,8 +554,10 @@ class AgnesAdapter(BaseAdapter):
             body["extra_body"] = extra_body
 
         # 发送请求
+        # 依据：Agnes Video V2.0 官方端点是 POST /v1/videos
+        # 参考 agnes-platform agnes_client.py:615
         response = await client.post(
-            url="/videos/generations",
+            url="/videos",
             json=body,
         )
 
@@ -586,22 +585,24 @@ class AgnesAdapter(BaseAdapter):
         Returns:
             视频任务状态
         """
+        # 复用现有连接池，不每次新建/关闭客户端
         client = self._get_client()
 
-        # 使用指定的 poll_url 或默认 base_url
-        base_url = self.poll_url or self.base_url
-        client = AsyncHttpClient(
-            base_url=base_url,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-            },
-        )
-        await client.start()
-
         try:
-            response = await client.get(
-                url=f"/videos/generations/{task_id}",
-            )
+            # 优先使用 poll_url（Agnes 特有的 /agnesapi 轮询通道，响应更快）
+            # 参考 agnes-platform agnes_client.py:960-975 的双路径策略
+            if self.poll_url:
+                try:
+                    response = await client.get(
+                        url=self.poll_url,
+                        params={"video_id": task_id, "model_name": model},
+                    )
+                except (NetworkError, TimeoutError):
+                    # 网络错误时回退到 /videos/{task_id}（旧版兼容路径）
+                    response = await client.get(url=f"/videos/{task_id}")
+            else:
+                response = await client.get(url=f"/videos/{task_id}")
+
             data = response.json()
 
             return VideoStatus(
@@ -614,8 +615,9 @@ class AgnesAdapter(BaseAdapter):
                 created_at=data.get("created"),
                 updated_at=data.get("updated"),
             )
-        finally:
-            await client.close()
+        except APIError:
+            # 4xx 等 API 错误直接抛出，不回退
+            raise
 
     # ==================== 模型信息 ====================
 
@@ -626,115 +628,21 @@ class AgnesAdapter(BaseAdapter):
         """
         获取可用模型列表
 
+        调用 GET /models 实时拉取，不再使用硬编码示例。
+
         Args:
-            model_type: 模型类型过滤
+            model_type: 模型类型过滤（chat/image/video）
 
         Returns:
             模型信息列表
         """
-        # 预定义的模型列表（实际应该从 API 获取）
-        models = [
-            # 文本对话模型
-            ModelInfo(
-                id="claude-3-opus",
-                name="Claude 3 Opus",
-                type="chat",
-                provider="agnes",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "streaming",
-                ],
-                max_tokens=200000,
-                supports_streaming=True,
-            ),
-            ModelInfo(
-                id="claude-3-sonnet",
-                name="Claude 3 Sonnet",
-                type="chat",
-                provider="agnes",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "streaming",
-                ],
-                max_tokens=200000,
-                supports_streaming=True,
-            ),
-            ModelInfo(
-                id="gpt-4o",
-                name="GPT-4o",
-                type="chat",
-                provider="agnes",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "json_mode",
-                    "streaming",
-                ],
-                max_tokens=128000,
-                supports_streaming=True,
-            ),
-            # 图像生成模型
-            ModelInfo(
-                id="dall-e-3",
-                name="DALL-E 3",
-                type="image",
-                provider="agnes",
-                capabilities=["text2image", "image2image", "inpaint"],
-            ),
-            ModelInfo(
-                id="seedream-3",
-                name="Seedream 3.0",
-                type="image",
-                provider="agnes",
-                capabilities=["text2image", "image2image", "inpaint"],
-            ),
-            # 视频生成模型
-            ModelInfo(
-                id="video-gen-1",
-                name="Video Gen 1",
-                type="video",
-                provider="agnes",
-                capabilities=["text2video"],
-            ),
-            ModelInfo(
-                id="video-gen-2",
-                name="Video Gen 2",
-                type="video",
-                provider="agnes",
-                capabilities=["text2video", "image2video"],
-            ),
-            # 嵌入模型
-            ModelInfo(
-                id="text-embedding-3-small",
-                name="Text Embedding 3 Small",
-                type="chat",
-                provider="agnes",
-                capabilities=["embedding"],
-                max_tokens=8191,
-            ),
-            ModelInfo(
-                id="bge-m3",
-                name="BGE M3",
-                type="chat",
-                provider="agnes",
-                capabilities=["embedding"],
-                max_tokens=8192,
-            ),
-        ]
-
-        # 按类型过滤
-        if model_type:
-            models = [m for m in models if m.type == model_type]
-
-        return models
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="agnes",
+            model_type=model_type,
+        )
 
 
 # 注册适配器

@@ -12,34 +12,35 @@ AGN-SDK 语音功能适配器单元测试
 - 使用 unittest.mock 模拟 HTTP 请求，验证请求构造和响应解析
 """
 
-import io
 import base64
+import io
 import tempfile
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agn.adapters.chinese import (
-    QwenAdapter,
-    DoubaoAdapter,
-    MiniMaxAdapter,
-)
+import pytest
+
+from agn.adapters.additional_models import GroqAdapter
 from agn.adapters.aggregation_platforms import (
+    FireworksAIAdapter,
     SiliconFlowAdapter,
     TogetherAIAdapter,
-    FireworksAIAdapter,
 )
-from agn.adapters.openai import OpenAIAdapter
-from agn.adapters.additional_models import GroqAdapter
 from agn.adapters.audio_adapters import (
-    ElevenLabsAdapter,
-    DeepgramAdapter,
     AssemblyAIAdapter,
     CartesiaAdapter,
+    DeepgramAdapter,
     EdgeTTSAdapter,
+    ElevenLabsAdapter,
 )
 from agn.adapters.base import Capabilities
+from agn.adapters.chinese import (
+    DoubaoAdapter,
+    MiniMaxAdapter,
+    QwenAdapter,
+)
+from agn.adapters.openai import OpenAIAdapter
+from agn.models.audio import SpeechResult, TranscriptionResult
 from agn.models.common import ProviderConfig
-from agn.models.audio import TranscriptionResult, SpeechResult
 
 # OpenAI 兼容 ASR/TTS 适配器（继承 OpenAICompatibleAudioMixin）
 AUDIO_ADAPTERS = [
@@ -195,31 +196,68 @@ class TestAudioModelsInList:
     async def test_list_models_includes_audio_models(
         self, adapter_cls, expected_asr_models, expected_tts_models, mock_api_key
     ):
-        """测试列表包含预期的语音模型"""
+        """测试列表包含预期的语音模型
+
+        HTTP-based 适配器（Qwen/Doubao/SiliconFlow/Together/Fireworks/OpenAI/Groq）
+        通过 mock /models 端点返回预期模型；硬编码适配器（MiniMax）不调用
+        HTTP，mock 不会被使用，直接返回硬编码列表。
+        """
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
-        models = await adapter.list_models()
+        await adapter.start()
+        try:
+            # 构造 mock 响应（OpenAI 兼容格式），包含预期的 ASR/TTS 模型
+            mock_data = {
+                "data": [
+                    {
+                        "id": mid,
+                        "name": mid,
+                        "capabilities": ["audio_transcribe"],
+                    }
+                    for mid in expected_asr_models
+                ]
+                + [
+                    {
+                        "id": mid,
+                        "name": mid,
+                        "capabilities": ["audio_speech"],
+                    }
+                    for mid in expected_tts_models
+                ]
+            }
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json = MagicMock(return_value=mock_data)
 
-        model_ids = {m.id for m in models}
-        model_capabilities = {m.id: m.capabilities for m in models}
+            with patch.object(
+                adapter._http_client, "get", new_callable=AsyncMock
+            ) as mock_get:
+                mock_get.return_value = mock_resp
+                models = await adapter.list_models()
 
-        for model_id in expected_asr_models:
-            assert model_id in model_ids, f"模型列表缺少 ASR 模型: {model_id}"
-            assert (
-                "audio_transcribe" in model_capabilities[model_id]
-            ), f"模型 {model_id} 缺少 audio_transcribe 能力标记"
+            model_ids = {m.id for m in models}
+            model_capabilities = {m.id: m.capabilities for m in models}
 
-        for model_id in expected_tts_models:
-            assert model_id in model_ids, f"模型列表缺少 TTS 模型: {model_id}"
-            assert (
-                "audio_speech" in model_capabilities[model_id]
-            ), f"模型 {model_id} 缺少 audio_speech 能力标记"
+            for model_id in expected_asr_models:
+                assert model_id in model_ids, f"模型列表缺少 ASR 模型: {model_id}"
+                assert (
+                    "audio_transcribe" in model_capabilities[model_id]
+                ), f"模型 {model_id} 缺少 audio_transcribe 能力标记"
+
+            for model_id in expected_tts_models:
+                assert model_id in model_ids, f"模型列表缺少 TTS 模型: {model_id}"
+                assert (
+                    "audio_speech" in model_capabilities[model_id]
+                ), f"模型 {model_id} 缺少 audio_speech 能力标记"
+        finally:
+            await adapter.close()
 
     @pytest.mark.parametrize(
-        "adapter_cls,expected_tts_models",
+        "adapter_cls,endpoint,expected_tts_models",
         [
             (
                 ElevenLabsAdapter,
+                "/models",
                 [
                     "eleven_multilingual_v2",
                     "eleven_multilingual_v1",
@@ -233,21 +271,41 @@ class TestAudioModelsInList:
     )
     @pytest.mark.asyncio
     async def test_list_models_tts_only_adapters(
-        self, adapter_cls, expected_tts_models, mock_api_key
+        self, adapter_cls, endpoint, expected_tts_models, mock_api_key
     ):
-        """测试 TTS-only 适配器的模型列表"""
+        """测试 TTS-only 适配器的模型列表（实时拉取 /models 端点）"""
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
-        models = await adapter.list_models()
+        await adapter.start()
+        try:
+            mock_data = {
+                "data": [
+                    {"id": mid, "name": mid, "capabilities": ["audio_speech"]}
+                    for mid in expected_tts_models
+                ]
+            }
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json = MagicMock(return_value=mock_data)
 
-        model_ids = {m.id for m in models}
-        model_capabilities = {m.id: m.capabilities for m in models}
+            with patch.object(
+                adapter._http_client, "get", new_callable=AsyncMock
+            ) as mock_get:
+                mock_get.return_value = mock_resp
+                models = await adapter.list_models()
 
-        for model_id in expected_tts_models:
-            assert model_id in model_ids, f"模型列表缺少 TTS 模型: {model_id}"
-            assert (
-                "audio_speech" in model_capabilities[model_id]
-            ), f"模型 {model_id} 缺少 audio_speech 能力标记"
+                mock_get.assert_called_once_with(url=endpoint)
+
+            model_ids = {m.id for m in models}
+            model_capabilities = {m.id: m.capabilities for m in models}
+
+            for model_id in expected_tts_models:
+                assert model_id in model_ids, f"模型列表缺少 TTS 模型: {model_id}"
+                assert (
+                    "audio_speech" in model_capabilities[model_id]
+                ), f"模型 {model_id} 缺少 audio_speech 能力标记"
+        finally:
+            await adapter.close()
 
     @pytest.mark.parametrize(
         "adapter_cls,expected_asr_models",
@@ -295,21 +353,57 @@ class TestAudioModelsInList:
     @pytest.mark.parametrize("adapter_cls", ALL_ASR_ADAPTERS)
     @pytest.mark.asyncio
     async def test_list_audio_type_models(self, adapter_cls, mock_api_key):
-        """测试按 type='audio' 过滤只返回语音模型"""
+        """测试按 type='audio' 过滤只返回语音模型
+
+        HTTP-based 适配器通过 mock /models 端点返回含 audio 类型的模型；
+        硬编码适配器（MiniMax/Deepgram/AssemblyAI）不调用 HTTP，mock 不会被使用。
+        """
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
-        models = await adapter.list_models(model_type="audio")
+        await adapter.start()
+        try:
+            # 构造 mock 响应（含 chat 和 audio 类型模型）
+            mock_data = {
+                "data": [
+                    {"id": "gpt-4", "name": "GPT-4"},  # chat 类型
+                    {
+                        "id": "whisper-1",
+                        "name": "Whisper",
+                        "capabilities": ["audio_transcribe"],
+                    },  # audio 类型
+                    {
+                        "id": "tts-1",
+                        "name": "TTS 1",
+                        "capabilities": ["audio_speech"],
+                    },  # audio 类型
+                ]
+            }
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json = MagicMock(return_value=mock_data)
 
-        assert len(models) > 0, "应该有语音模型"
-        for m in models:
-            assert (
-                m.type == "audio"
-            ), f"模型 {m.id} 的 type 应该是 audio，实际是 {m.type}"
+            with patch.object(
+                adapter._http_client, "get", new_callable=AsyncMock
+            ) as mock_get:
+                mock_get.return_value = mock_resp
+                models = await adapter.list_models(model_type="audio")
 
-    @pytest.mark.parametrize("adapter_cls", TTS_ONLY_ADAPTERS)
+            assert len(models) > 0, "应该有语音模型"
+            for m in models:
+                assert (
+                    m.type == "audio"
+                ), f"模型 {m.id} 的 type 应该是 audio，实际是 {m.type}"
+        finally:
+            await adapter.close()
+
+    @pytest.mark.parametrize("adapter_cls", [EdgeTTSAdapter])
     @pytest.mark.asyncio
     async def test_list_audio_type_models_tts_only(self, adapter_cls, mock_api_key):
-        """测试 TTS-only 适配器按 type='audio' 过滤"""
+        """测试硬编码 TTS-only 适配器（EdgeTTS）按 type='audio' 过滤
+
+        注：ElevenLabs/Cartesia 已改为实时拉取 /models 端点，
+        其模型列表测试见 TestElevenLabsTTS / TestCartesiaTTS 中的 test_list_models。
+        """
         config = ProviderConfig(provider_type="test", api_key=mock_api_key)
         adapter = adapter_cls(config=config)
         models = await adapter.list_models(model_type="audio")
@@ -2639,18 +2733,52 @@ class TestCartesiaTTS:
 
     @pytest.mark.asyncio
     async def test_list_models(self):
-        """测试列出 Cartesia TTS 模型"""
+        """测试列出 Cartesia TTS 模型（实时拉取 /tts/models 端点）"""
         await self.adapter.start()
         try:
-            models = await self.adapter.list_models()
-            ids = {m.id for m in models}
-            assert "sonic-2" in ids
-            assert "sonic-turbo" in ids
-            assert "sonic-2-2025-04-01" in ids
-            for m in models:
-                assert m.provider == "cartesia"
-                assert "audio_speech" in m.capabilities
-                assert m.type == "audio"
+            mock_data = {
+                "data": [
+                    {
+                        "id": "sonic-2",
+                        "name": "Sonic 2",
+                        "capabilities": ["audio_speech"],
+                    },
+                    {
+                        "id": "sonic-2-2025-04-01",
+                        "name": "Sonic 2 (2025-04-01)",
+                        "capabilities": ["audio_speech"],
+                    },
+                    {
+                        "id": "sonic-turbo",
+                        "name": "Sonic Turbo",
+                        "capabilities": ["audio_speech"],
+                    },
+                    {
+                        "id": "sonic-preview",
+                        "name": "Sonic Preview",
+                        "capabilities": ["audio_speech"],
+                    },
+                ]
+            }
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json = MagicMock(return_value=mock_data)
+
+            with patch.object(
+                self.adapter._http_client, "get", new_callable=AsyncMock
+            ) as mock_get:
+                mock_get.return_value = mock_resp
+                models = await self.adapter.list_models()
+
+                mock_get.assert_called_once_with(url="/tts/models")
+                ids = {m.id for m in models}
+                assert "sonic-2" in ids
+                assert "sonic-turbo" in ids
+                assert "sonic-2-2025-04-01" in ids
+                for m in models:
+                    assert m.provider == "cartesia"
+                    assert "audio_speech" in m.capabilities
+                    assert m.type == "audio"
         finally:
             await self.adapter.close()
 

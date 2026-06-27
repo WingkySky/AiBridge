@@ -4,8 +4,9 @@ AGN-SDK Kling (可灵) 适配器测试
 测试 KlingAdapter 的各项功能，包括视频创建、视频轮询、错误处理等。
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.kling import KlingAdapter
 from agn.core.errors import UnsupportedCapabilityError

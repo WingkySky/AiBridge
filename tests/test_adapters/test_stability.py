@@ -4,12 +4,12 @@ AGN-SDK Stability AI 适配器测试
 测试 StabilityAdapter 的各项功能，包括图像生成、错误处理等。
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.stability import StabilityAdapter
 from agn.core.errors import UnsupportedCapabilityError
-from agn.models.chat import ChatMessage
 from agn.models.common import ProviderConfig
 from agn.models.image import ImageGenerationResult
 
@@ -53,7 +53,6 @@ class TestStabilityAdapter:
     @pytest.mark.asyncio
     async def test_chat_not_supported(self, adapter: StabilityAdapter) -> None:
         """测试文本对话不支持"""
-        from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.chat(
@@ -64,7 +63,6 @@ class TestStabilityAdapter:
     @pytest.mark.asyncio
     async def test_video_not_supported(self, adapter: StabilityAdapter) -> None:
         """测试视频生成不支持"""
-        from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.video_create(
@@ -82,34 +80,107 @@ class TestStabilityAdapterListModels:
         config = ProviderConfig(provider_type="stability", api_key=mock_api_key)
         return StabilityAdapter(config=config)
 
+    def _mock_response(self, json_data: list | dict) -> MagicMock:
+        """创建模拟 HTTP 响应（Stability 返回顶层数组）"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        mock_resp.headers = {}
+        return mock_resp
+
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: StabilityAdapter) -> None:
-        """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
+        """测试获取所有模型（实时拉取 /v1/engines/list）"""
+        await adapter.start()
 
-        types = {m.type for m in models}
-        assert "image" in types
-        assert "chat" not in types
-        assert "video" not in types
+        # Stability 返回顶层数组
+        mock_engines = [
+            {
+                "id": "stable-diffusion-xl-1024-v1-1",
+                "name": "Stable Diffusion XL 1.1",
+                "type": "picture",
+            },
+            {
+                "id": "stable-diffusion-3-medium",
+                "name": "Stable Diffusion 3 Medium",
+                "type": "picture",
+            },
+        ]
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_engines)
+
+            models = await adapter.list_models()
+
+            # 验证调用了 /v1/engines/list 端点
+            mock_get.assert_called_once_with("/v1/engines/list")
+            assert len(models) == 2
+            for model in models:
+                assert model.provider == "stability"
+            ids = {m.id for m in models}
+            assert "stable-diffusion-xl-1024-v1-1" in ids
+            assert "stable-diffusion-3-medium" in ids
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_image_models(self, adapter: StabilityAdapter) -> None:
-        """测试获取图像模型"""
-        models = await adapter.list_models(model_type="image")
-        assert len(models) > 0
-        for model in models:
-            assert model.type == "image"
+        """测试获取图像模型（按类型过滤）"""
+        await adapter.start()
+
+        # 模型 ID 中包含 "stable-diffusion"，基类 _infer_type 会推断为 image
+        mock_engines = [
+            {
+                "id": "stable-diffusion-xl-1024-v1-1",
+                "name": "Stable Diffusion XL 1.1",
+            },
+            {
+                "id": "stable-diffusion-3-medium",
+                "name": "Stable Diffusion 3 Medium",
+            },
+        ]
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_engines)
+
+            models = await adapter.list_models(model_type="image")
+            assert len(models) > 0
+            for model in models:
+                assert model.type == "image"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
-    async def test_model_capabilities(self, adapter: StabilityAdapter) -> None:
-        """测试模型能力"""
-        models = await adapter.list_models(model_type="image")
-        for model in models:
-            assert (
-                "text2image" in model.capabilities
-                or "image2image" in model.capabilities
-            )
+    async def test_list_models_wraps_top_level_array(
+        self, adapter: StabilityAdapter
+    ) -> None:
+        """测试 Stability 顶层数组响应被正确包装为 {"data": [...]}"""
+        await adapter.start()
+
+        mock_engines = [
+            {
+                "id": "stable-diffusion-xl-1024-v1-1",
+                "name": "Stable Diffusion XL 1.1",
+            }
+        ]
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_engines)
+
+            models = await adapter.list_models()
+
+            assert len(models) == 1
+            assert models[0].id == "stable-diffusion-xl-1024-v1-1"
+            assert models[0].name == "Stable Diffusion XL 1.1"
+            assert models[0].provider == "stability"
+
+        await adapter.close()
 
 
 class TestStabilityAdapterStatusMapping:

@@ -349,6 +349,7 @@ class IdeogramAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
+        # NOTE: 该 Provider 无标准 /models 端点，暂保留硬编码列表
         """获取可用模型列表"""
         models = [
             ModelInfo(
@@ -737,6 +738,7 @@ class LumaAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
+        # NOTE: 该 Provider 无标准 /models 端点，暂保留硬编码列表
         """获取可用模型列表"""
         models = [
             ModelInfo(
@@ -1094,70 +1096,24 @@ class LlamaAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        """获取可用模型列表"""
-        models = [
-            ModelInfo(
-                id="llama-4-maverick",
-                name="Llama 4 Maverick",
-                type="chat",
-                provider="llama",
-                capabilities=["chat", "vision"],
-                description="Llama 4 Maverick 旗舰多模态模型",
-            ),
-            ModelInfo(
-                id="llama-4-scout",
-                name="Llama 4 Scout",
-                type="chat",
-                provider="llama",
-                capabilities=["chat", "vision"],
-                description="Llama 4 Scout 轻量多模态模型",
-            ),
-            ModelInfo(
-                id="llama-3.3-70b-instruct",
-                name="Llama 3.3 70B Instruct",
-                type="chat",
-                provider="llama",
-                capabilities=["chat"],
-                description="Llama 3.3 70B 指令微调版",
-            ),
-            ModelInfo(
-                id="llama-3.1-405b-instruct",
-                name="Llama 3.1 405B Instruct",
-                type="chat",
-                provider="llama",
-                capabilities=["chat"],
-                description="Llama 3.1 405B 超大参数模型",
-            ),
-            ModelInfo(
-                id="llama-3.1-70b-instruct",
-                name="Llama 3.1 70B Instruct",
-                type="chat",
-                provider="llama",
-                capabilities=["chat"],
-                description="Llama 3.1 70B 通用模型",
-            ),
-            ModelInfo(
-                id="llama-3.1-8b-instruct",
-                name="Llama 3.1 8B Instruct",
-                type="chat",
-                provider="llama",
-                capabilities=["chat"],
-                description="Llama 3.1 8B 轻量模型",
-            ),
-            ModelInfo(
-                id="llama-guard-4",
-                name="Llama Guard 4",
-                type="chat",
-                provider="llama",
-                capabilities=["chat"],
-                description="Llama Guard 4 安全审查模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（OpenAI 兼容端点），不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="llama",
+            model_type=model_type,
+        )
 
     # ==================== 辅助方法 ====================
 

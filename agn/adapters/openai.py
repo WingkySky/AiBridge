@@ -470,126 +470,21 @@ class OpenAIAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         """
         获取可用模型列表
 
+        调用 GET /models 实时拉取，不再使用硬编码示例。
+
         Args:
-            model_type: 模型类型过滤
+            model_type: 模型类型过滤（chat/image/audio）
 
         Returns:
             模型信息列表
         """
-        models = [
-            # 文本对话模型
-            ModelInfo(
-                id="gpt-4o",
-                name="GPT-4o",
-                type="chat",
-                provider="openai",
-                capabilities=["chat"],
-                max_tokens=128000,
-                supports_streaming=True,
-            ),
-            ModelInfo(
-                id="gpt-4-turbo",
-                name="GPT-4 Turbo",
-                type="chat",
-                provider="openai",
-                capabilities=["chat"],
-                max_tokens=128000,
-                supports_streaming=True,
-            ),
-            ModelInfo(
-                id="gpt-4",
-                name="GPT-4",
-                type="chat",
-                provider="openai",
-                capabilities=["chat"],
-                max_tokens=8192,
-                supports_streaming=True,
-            ),
-            ModelInfo(
-                id="gpt-3.5-turbo",
-                name="GPT-3.5 Turbo",
-                type="chat",
-                provider="openai",
-                capabilities=["chat"],
-                max_tokens=16384,
-                supports_streaming=True,
-            ),
-            # 图像生成模型
-            ModelInfo(
-                id="dall-e-3",
-                name="DALL-E 3",
-                type="image",
-                provider="openai",
-                capabilities=["text2image", "image2image"],
-            ),
-            # 嵌入模型
-            ModelInfo(
-                id="text-embedding-3-small",
-                name="Text Embedding 3 Small",
-                type="chat",
-                provider="openai",
-                capabilities=["embedding"],
-                max_tokens=8191,
-            ),
-            ModelInfo(
-                id="text-embedding-3-large",
-                name="Text Embedding 3 Large",
-                type="chat",
-                provider="openai",
-                capabilities=["embedding"],
-                max_tokens=8191,
-            ),
-            ModelInfo(
-                id="text-embedding-ada-002",
-                name="Text Embedding Ada 002",
-                type="chat",
-                provider="openai",
-                capabilities=["embedding"],
-                max_tokens=8191,
-            ),
-            # 语音转文字模型
-            ModelInfo(
-                id="whisper-1",
-                name="Whisper",
-                type="audio",
-                provider="openai",
-                capabilities=["audio_transcribe", "audio_translate"],
-            ),
-            ModelInfo(
-                id="gpt-4o-transcribe",
-                name="GPT-4o Transcribe",
-                type="audio",
-                provider="openai",
-                capabilities=["audio_transcribe"],
-            ),
-            ModelInfo(
-                id="gpt-4o-mini-transcribe",
-                name="GPT-4o Mini Transcribe",
-                type="audio",
-                provider="openai",
-                capabilities=["audio_transcribe"],
-            ),
-            # 文字转语音模型
-            ModelInfo(
-                id="tts-1",
-                name="TTS-1",
-                type="audio",
-                provider="openai",
-                capabilities=["audio_speech"],
-            ),
-            ModelInfo(
-                id="tts-1-hd",
-                name="TTS-1 HD",
-                type="audio",
-                provider="openai",
-                capabilities=["audio_speech"],
-            ),
-        ]
-
-        if model_type:
-            models = [m for m in models if m.type == model_type]
-
-        return models
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="openai",
+            model_type=model_type,
+        )
 
     # ==================== 语音翻译（OpenAI 特有能力）====================
 

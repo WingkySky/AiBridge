@@ -2,16 +2,26 @@
 AGN-SDK 更多模型适配器测试 (DeepSeek/StepFun/Mistral/Cohere/Perplexity)
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from agn.adapters.more_models import (
-    DeepSeekAdapter,
-    StepFunAdapter,
-    MistralAdapter,
     CohereAdapter,
+    DeepSeekAdapter,
+    MistralAdapter,
     PerplexityAdapter,
+    StepFunAdapter,
 )
 from agn.models.common import ProviderConfig
+
+
+def _mock_models_response(json_data: dict) -> MagicMock:
+    """创建模拟 HTTP 响应（用于 list_models 的 /models 端点 Mock）"""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json = MagicMock(return_value=json_data)
+    return mock_resp
 
 
 class TestDeepSeekAdapter:
@@ -47,19 +57,49 @@ class TestDeepSeekAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: DeepSeekAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 5
-        model_ids = {m.id for m in models}
-        assert "deepseek-v4-pro" in model_ids
-        assert "deepseek-v4-flash" in model_ids
-        assert "deepseek-coder" in model_ids
+        await adapter.start()
+        mock_result = {
+            "data": [
+                {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro"},
+                {"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash"},
+                {"id": "deepseek-chat", "name": "DeepSeek Chat"},
+                {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner"},
+                {"id": "deepseek-coder", "name": "DeepSeek Coder"},
+            ]
+        }
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+            models = await adapter.list_models()
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 5
+            model_ids = {m.id for m in models}
+            assert "deepseek-v4-pro" in model_ids
+            assert "deepseek-v4-flash" in model_ids
+            assert "deepseek-coder" in model_ids
+            for model in models:
+                assert model.provider == "deepseek"
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: DeepSeekAdapter) -> None:
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) >= 5
-        for model in models:
-            assert model.type == "chat"
+        await adapter.start()
+        mock_result = {
+            "data": [
+                {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro"},
+                {"id": "deepseek-coder", "name": "DeepSeek Coder"},
+            ]
+        }
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+            models = await adapter.list_models(model_type="chat")
+            assert len(models) == 2
+            for model in models:
+                assert model.type == "chat"
+        await adapter.close()
 
 
 class TestStepFunAdapter:
@@ -95,12 +135,32 @@ class TestStepFunAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: StepFunAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 7
-        model_ids = {m.id for m in models}
-        assert "step-3-flash" in model_ids
-        assert "step-3-128k" in model_ids
-        assert "step-1o-turbo" in model_ids
+        await adapter.start()
+        mock_result = {
+            "data": [
+                {"id": "step-3-flash", "name": "Step 3 Flash"},
+                {"id": "step-3-8k", "name": "Step 3 8K"},
+                {"id": "step-3-32k", "name": "Step 3 32K"},
+                {"id": "step-3-128k", "name": "Step 3 128K"},
+                {"id": "step-2-mini", "name": "Step 2 Mini"},
+                {"id": "step-1o-turbo", "name": "Step 1o Turbo"},
+                {"id": "step-1o-mini", "name": "Step 1o Mini"},
+            ]
+        }
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+            models = await adapter.list_models()
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 7
+            model_ids = {m.id for m in models}
+            assert "step-3-flash" in model_ids
+            assert "step-3-128k" in model_ids
+            assert "step-1o-turbo" in model_ids
+            for model in models:
+                assert model.provider == "stepfun"
+        await adapter.close()
 
 
 class TestMistralAdapter:
@@ -135,19 +195,51 @@ class TestMistralAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: MistralAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 7
-        model_ids = {m.id for m in models}
-        assert "mistral-sonnet-4-2505" in model_ids
-        assert "mixtral-8x22b-2404" in model_ids
-        assert "codestral-2405" in model_ids
+        await adapter.start()
+        mock_result = {
+            "data": [
+                {"id": "mistral-sonnet-4-2505", "name": "Mistral Sonnet 4"},
+                {"id": "mistral-nemo-2407", "name": "Mistral Nemo"},
+                {"id": "mistral-small-2407", "name": "Mistral Small"},
+                {"id": "mixtral-8x22b-2404", "name": "Mixtral 8x22B"},
+                {"id": "mixtral-8x7b-2407", "name": "Mixtral 8x7B"},
+                {"id": "codestral-2405", "name": "Codestral"},
+                {"id": "mathstral-2407", "name": "Mathstral"},
+            ]
+        }
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+            models = await adapter.list_models()
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 7
+            model_ids = {m.id for m in models}
+            assert "mistral-sonnet-4-2505" in model_ids
+            assert "mixtral-8x22b-2404" in model_ids
+            assert "codestral-2405" in model_ids
+            for model in models:
+                assert model.provider == "mistral"
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: MistralAdapter) -> None:
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) >= 7
-        for model in models:
-            assert model.type == "chat"
+        await adapter.start()
+        mock_result = {
+            "data": [
+                {"id": "mistral-sonnet-4-2505", "name": "Mistral Sonnet 4"},
+                {"id": "codestral-2405", "name": "Codestral"},
+            ]
+        }
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+            models = await adapter.list_models(model_type="chat")
+            assert len(models) == 2
+            for model in models:
+                assert model.type == "chat"
+        await adapter.close()
 
 
 class TestCohereAdapter:
@@ -199,12 +291,32 @@ class TestCohereAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: CohereAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 6
-        model_ids = {m.id for m in models}
-        assert "command-r-plus-08-2024" in model_ids
-        assert "command-r-08-2024" in model_ids
-        assert "c4ai-aya-23-35b" in model_ids
+        await adapter.start()
+        # Cohere v1 /models 响应：模型列表在 "models" 键下，模型 ID 字段为 "name"
+        mock_result = {
+            "models": [
+                {"name": "command-r-plus-08-2024"},
+                {"name": "command-r-08-2024"},
+                {"name": "command-plus"},
+                {"name": "command"},
+                {"name": "c4ai-aya-23-8b"},
+                {"name": "c4ai-aya-23-35b"},
+            ]
+        }
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+            models = await adapter.list_models()
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 6
+            model_ids = {m.id for m in models}
+            assert "command-r-plus-08-2024" in model_ids
+            assert "command-r-08-2024" in model_ids
+            assert "c4ai-aya-23-35b" in model_ids
+            for model in models:
+                assert model.provider == "cohere"
+        await adapter.close()
 
 
 class TestPerplexityAdapter:
@@ -239,10 +351,31 @@ class TestPerplexityAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: PerplexityAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 8
-        model_ids = {m.id for m in models}
-        assert "sonar-pro" in model_ids
-        assert "sonar" in model_ids
-        assert "sonar-reasoning" in model_ids
-        assert "llama-3.1-sonar-huge-128k-online" in model_ids
+        await adapter.start()
+        mock_result = {
+            "data": [
+                {"id": "sonar-pro", "name": "Sonar Pro"},
+                {"id": "sonar", "name": "Sonar"},
+                {"id": "sonar-pro-realtime", "name": "Sonar Pro Realtime"},
+                {"id": "sonar-reasoning-pro", "name": "Sonar Reasoning Pro"},
+                {"id": "sonar-reasoning", "name": "Sonar Reasoning"},
+                {"id": "llama-3.1-sonar-small-128k-online", "name": "Llama Small"},
+                {"id": "llama-3.1-sonar-large-128k-online", "name": "Llama Large"},
+                {"id": "llama-3.1-sonar-huge-128k-online", "name": "Llama Huge"},
+            ]
+        }
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+            models = await adapter.list_models()
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 8
+            model_ids = {m.id for m in models}
+            assert "sonar-pro" in model_ids
+            assert "sonar" in model_ids
+            assert "sonar-reasoning" in model_ids
+            assert "llama-3.1-sonar-huge-128k-online" in model_ids
+            for model in models:
+                assert model.provider == "perplexity"
+        await adapter.close()

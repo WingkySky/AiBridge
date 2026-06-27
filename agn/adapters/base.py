@@ -73,6 +73,50 @@ class Capabilities:
     AUDIO_SPEECH = "audio_speech"
 
 
+# 模型类型推断关键字：用于从 /models 端点拉取的模型 ID 推断类型
+# 参考 agnes-platform provider_registry._detect_type()
+_MODEL_TYPE_KEYWORDS: dict[str, list[str]] = {
+    "image": [
+        "image",
+        "flux",
+        "sd3",
+        "sdxl",
+        "dall",
+        "seedream",
+        "wanx",
+        "ideogram",
+        "midjourney",
+        "stable-diffusion",
+        "Imagen",
+    ],
+    "video": [
+        "video",
+        "veo",
+        "seedance",
+        "cogvideox",
+        "wan",
+        "kling",
+        "runway",
+        "pika",
+        "luma",
+        "Sora",
+        "Vidu",
+    ],
+    "audio": [
+        "whisper",
+        "tts",
+        "speech",
+        "transcribe",
+        "nova",
+        "sonic",
+        "edge-tts",
+        "eleven",
+        "cosyvoice",
+        "sensevoice",
+    ],
+}
+
+
 class BaseAdapter(ABC):
     """
     适配器基类
@@ -657,6 +701,77 @@ class BaseAdapter(ABC):
             模型信息列表
         """
         pass
+
+    @staticmethod
+    def _infer_type(model_id: str) -> str:
+        """
+        根据模型 ID 推断模型类型
+
+        用于从 /models 端点拉取的模型列表（通常只返回 id 字符串）推断
+        chat / image / video / audio 类型。
+
+        Args:
+            model_id: 模型标识符
+
+        Returns:
+            模型类型（chat / image / video / audio）
+        """
+        lower = model_id.lower()
+        for type_name, keywords in _MODEL_TYPE_KEYWORDS.items():
+            if any(kw.lower() in lower for kw in keywords):
+                return type_name
+        return "chat"
+
+    @staticmethod
+    def _parse_models_response(
+        data: dict[str, Any],
+        provider: str,
+        model_type: str | None = None,
+        items_key: str = "data",
+    ) -> list["ModelInfo"]:
+        """
+        解析 OpenAI 兼容的 /models 响应为 ModelInfo 列表
+
+        适用于返回 {"data": [{"id": ..., ...}]} 结构的端点。
+        各适配器调用 /models 端点后，传入响应数据由本方法统一解析。
+
+        Args:
+            data: /models 端点返回的 JSON 数据
+            provider: Provider 类型标识（如 'openai'、'anthropic'）
+            model_type: 模型类型过滤（可选）
+            items_key: 响应中模型列表的键名，默认 'data'
+
+        Returns:
+            模型信息列表
+        """
+        from agn.models.common import ModelInfo
+
+        models: list[ModelInfo] = []
+        for item in data.get(items_key, []):
+            # 兼容 OpenAI 的 "id"、Anthropic 的 "id"、Gemini 的 "name"（需调用方预处理）
+            model_id = item.get("id", "")
+            if not model_id:
+                continue
+
+            inferred_type = BaseAdapter._infer_type(model_id)
+
+            models.append(
+                ModelInfo(
+                    id=model_id,
+                    # 兼容 OpenAI 无 name、Anthropic 的 display_name
+                    name=item.get("name") or item.get("display_name") or model_id,
+                    type=inferred_type,
+                    provider=provider,
+                    capabilities=item.get("capabilities", []),
+                    description=item.get("description"),
+                    created=item.get("created"),
+                )
+            )
+
+        if model_type:
+            models = [m for m in models if m.type == model_type]
+
+        return models
 
     # ==================== 音色查询（TTS Provider 可选实现）====================
 

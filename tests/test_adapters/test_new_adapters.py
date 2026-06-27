@@ -2,12 +2,22 @@
 AGN-SDK Anthropic/Gemini/Kling 适配器测试
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from agn.adapters.anthropic import AnthropicAdapter
 from agn.adapters.gemini import GeminiAdapter
 from agn.adapters.kling import KlingAdapter
 from agn.models.common import ProviderConfig
+
+
+def _mock_response(json_data: dict) -> MagicMock:
+    """创建模拟 HTTP 响应"""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json = MagicMock(return_value=json_data)
+    return mock_resp
 
 
 class TestAnthropicAdapter:
@@ -82,20 +92,56 @@ class TestAnthropicListModels:
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: AnthropicAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
-        model_ids = {m.id for m in models}
-        assert "claude-3-5-sonnet-20241022" in model_ids
-        assert "claude-3-opus-20240229" in model_ids
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {
+                    "id": "claude-3-5-sonnet-20241022",
+                    "display_name": "Claude 3.5 Sonnet",
+                },
+                {"id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_response(mock_result)
+
+            models = await adapter.list_models()
+            assert len(models) == 2
+            model_ids = {m.id for m in models}
+            assert "claude-3-5-sonnet-20241022" in model_ids
+            assert "claude-3-opus-20240229" in model_ids
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: AnthropicAdapter) -> None:
         """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) > 0
-        for model in models:
-            assert model.type == "chat"
-            assert "vision" in model.capabilities
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {
+                    "id": "claude-3-5-sonnet-20241022",
+                    "display_name": "Claude 3.5 Sonnet",
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+            assert len(models) > 0
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
 
 class TestGeminiAdapter:
@@ -161,19 +207,50 @@ class TestGeminiListModels:
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: GeminiAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
-        model_ids = {m.id for m in models}
-        assert "gemini-2.5-pro" in model_ids
-        assert "gemini-1.5-flash" in model_ids
+        await adapter.start()
+
+        mock_result = {
+            "models": [
+                {"name": "models/gemini-2.5-pro", "displayName": "Gemini 2.5 Pro"},
+                {"name": "models/gemini-1.5-flash", "displayName": "Gemini 1.5 Flash"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_response(mock_result)
+
+            models = await adapter.list_models()
+            assert len(models) == 2
+            model_ids = {m.id for m in models}
+            assert "gemini-2.5-pro" in model_ids
+            assert "gemini-1.5-flash" in model_ids
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: GeminiAdapter) -> None:
         """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) > 0
-        for model in models:
-            assert model.type == "chat"
+        await adapter.start()
+
+        mock_result = {
+            "models": [
+                {"name": "models/gemini-2.5-pro", "displayName": "Gemini 2.5 Pro"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+            assert len(models) > 0
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
 
 class TestKlingAdapter:

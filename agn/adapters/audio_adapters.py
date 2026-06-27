@@ -314,62 +314,24 @@ class ElevenLabsAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        """列出 ElevenLabs 可用模型"""
-        models = [
-            ModelInfo(
-                id="eleven_multilingual_v2",
-                name="Eleven Multilingual v2",
-                type="audio",
-                provider="elevenlabs",
-                capabilities=["audio_speech"],
-                description="多语言v2模型，支持29种语言，最新最稳定",
-            ),
-            ModelInfo(
-                id="eleven_multilingual_v1",
-                name="Eleven Multilingual v1",
-                type="audio",
-                provider="elevenlabs",
-                capabilities=["audio_speech"],
-                description="多语言v1模型",
-            ),
-            ModelInfo(
-                id="eleven_monolingual_v1",
-                name="Eleven English v1",
-                type="audio",
-                provider="elevenlabs",
-                capabilities=["audio_speech"],
-                description="英语单语言模型",
-            ),
-            ModelInfo(
-                id="eleven_turbo_v2_5",
-                name="Eleven Turbo v2.5",
-                type="audio",
-                provider="elevenlabs",
-                capabilities=["audio_speech"],
-                description="Turbo v2.5 极速模型，低延迟",
-            ),
-            ModelInfo(
-                id="eleven_turbo_v2",
-                name="Eleven Turbo v2",
-                type="audio",
-                provider="elevenlabs",
-                capabilities=["audio_speech"],
-                description="Turbo v2 极速模型",
-            ),
-            ModelInfo(
-                id="eleven_flash_v2_5",
-                name="Eleven Flash v2.5",
-                type="audio",
-                provider="elevenlabs",
-                capabilities=["audio_speech"],
-                description="Flash v2.5 最快模型，超低延迟",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（TTS 模型列表），不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video/audio）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="elevenlabs",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         """处理 ElevenLabs API 错误响应"""
@@ -811,6 +773,7 @@ class DeepgramAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
+        # NOTE: 该 Provider 无标准 /models 端点，暂保留硬编码列表
         """列出 Deepgram 可用 ASR 模型"""
         models = [
             ModelInfo(
@@ -1353,6 +1316,7 @@ class AssemblyAIAdapter(BaseAdapter):
         )
 
     async def list_models(self, model_type: str | None = None) -> list[ModelInfo]:
+        # NOTE: 该 Provider 无标准 /models 端点，暂保留硬编码列表
         """列出 AssemblyAI 可用模型"""
         models = [
             ModelInfo(
@@ -1633,44 +1597,24 @@ class CartesiaAdapter(BaseAdapter):
         )
 
     async def list_models(self, model_type: str | None = None) -> list[ModelInfo]:
-        """列出 Cartesia 可用 TTS 模型"""
-        models = [
-            ModelInfo(
-                id="sonic-2",
-                name="Sonic 2",
-                type="audio",
-                provider="cartesia",
-                capabilities=["audio_speech"],
-                description="Sonic 2 最新模型，最佳质量和多语言支持",
-            ),
-            ModelInfo(
-                id="sonic-2-2025-04-01",
-                name="Sonic 2 (2025-04-01)",
-                type="audio",
-                provider="cartesia",
-                capabilities=["audio_speech"],
-                description="Sonic 2 固定版本",
-            ),
-            ModelInfo(
-                id="sonic-turbo",
-                name="Sonic Turbo",
-                type="audio",
-                provider="cartesia",
-                capabilities=["audio_speech"],
-                description="Sonic Turbo 超低延迟版本",
-            ),
-            ModelInfo(
-                id="sonic-preview",
-                name="Sonic Preview",
-                type="audio",
-                provider="cartesia",
-                capabilities=["audio_speech"],
-                description="Sonic 预览版",
-            ),
-        ]
-        if model_type:
-            models = [m for m in models if m.type == model_type]
-        return models
+        """
+        获取可用模型列表
+
+        调用 GET /tts/models 实时拉取（TTS 模型列表），不再使用硬编码示例。
+
+        Args:
+            model_type: 模型类型过滤（chat/image/video/audio）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/tts/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="cartesia",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         """处理 Cartesia 错误响应"""
@@ -2166,6 +2110,7 @@ class EdgeTTSAdapter(BaseAdapter):
         )
 
     async def list_models(self, model_type: str | None = None) -> list[ModelInfo]:
+        # NOTE: 该 Provider 无标准 /models 端点，暂保留硬编码列表
         """列出 Edge TTS 模型"""
         models = [
             ModelInfo(

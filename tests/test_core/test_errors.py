@@ -2,7 +2,6 @@
 AGN-SDK 错误测试
 """
 
-import pytest
 
 from agn.core.errors import (
     AGNError,

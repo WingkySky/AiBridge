@@ -166,53 +166,24 @@ class DeepSeekAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            ModelInfo(
-                id="deepseek-v4-pro",
-                name="DeepSeek V4 Pro",
-                type="chat",
-                provider="deepseek",
-                capabilities=["chat", "vision"],
-                description="DeepSeek V4 Pro 旗舰模型，支持深度思考",
-            ),
-            ModelInfo(
-                id="deepseek-v4-flash",
-                name="DeepSeek V4 Flash",
-                type="chat",
-                provider="deepseek",
-                capabilities=["chat", "vision"],
-                description="DeepSeek V4 Flash 快速版本",
-            ),
-            ModelInfo(
-                id="deepseek-chat",
-                name="DeepSeek Chat",
-                type="chat",
-                provider="deepseek",
-                capabilities=["chat"],
-                description="DeepSeek Chat (即将弃用)",
-            ),
-            ModelInfo(
-                id="deepseek-reasoner",
-                name="DeepSeek Reasoner",
-                type="chat",
-                provider="deepseek",
-                capabilities=["chat"],
-                description="DeepSeek Reasoner 推理模型 (即将弃用)",
-            ),
-            ModelInfo(
-                id="deepseek-coder",
-                name="DeepSeek Coder",
-                type="chat",
-                provider="deepseek",
-                capabilities=["chat"],
-                description="DeepSeek Coder 代码专用模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（OpenAI 兼容端点），不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="deepseek",
+            model_type=model_type,
+        )
 
     def _build_request_body(
         self,
@@ -479,72 +450,25 @@ class StepFunAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Step 3 系列
-            ModelInfo(
-                id="step-3-flash",
-                name="Step 3 Flash",
-                type="chat",
-                provider="stepfun",
-                capabilities=["chat", "vision"],
-                description="Step 3 Flash 快速版本",
-            ),
-            ModelInfo(
-                id="step-3-8k",
-                name="Step 3 8K",
-                type="chat",
-                provider="stepfun",
-                capabilities=["chat", "vision"],
-                description="Step 3 8K 上下文",
-            ),
-            ModelInfo(
-                id="step-3-32k",
-                name="Step 3 32K",
-                type="chat",
-                provider="stepfun",
-                capabilities=["chat", "vision"],
-                description="Step 3 32K 上下文",
-            ),
-            ModelInfo(
-                id="step-3-128k",
-                name="Step 3 128K",
-                type="chat",
-                provider="stepfun",
-                capabilities=["chat", "vision"],
-                description="Step 3 128K 长上下文",
-            ),
-            # Step 2 系列
-            ModelInfo(
-                id="step-2-mini",
-                name="Step 2 Mini",
-                type="chat",
-                provider="stepfun",
-                capabilities=["chat"],
-                description="Step 2 Mini MFA 极速大模型",
-            ),
-            # Step 1o 系列
-            ModelInfo(
-                id="step-1o-turbo",
-                name="Step 1o Turbo",
-                type="chat",
-                provider="stepfun",
-                capabilities=["chat", "vision"],
-                description="Step 1o Turbo 视觉理解大模型",
-            ),
-            ModelInfo(
-                id="step-1o-mini",
-                name="Step 1o Mini",
-                type="chat",
-                provider="stepfun",
-                capabilities=["chat", "vision"],
-                description="Step 1o Mini 视觉理解",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（OpenAI 兼容端点），不再使用硬编码示例。
+        base_url 已包含 /v1 前缀，故请求路径为 /models。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="stepfun",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -782,73 +706,25 @@ class MistralAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Mistral 旗舰系列
-            ModelInfo(
-                id="mistral-sonnet-4-2505",
-                name="Mistral Sonnet 4",
-                type="chat",
-                provider="mistral",
-                capabilities=["chat", "vision"],
-                description="Mistral Sonnet 4 最新旗舰模型",
-            ),
-            ModelInfo(
-                id="mistral-nemo-2407",
-                name="Mistral Nemo",
-                type="chat",
-                provider="mistral",
-                capabilities=["chat"],
-                description="Mistral Nemo 12B 开源模型",
-            ),
-            ModelInfo(
-                id="mistral-small-2407",
-                name="Mistral Small",
-                type="chat",
-                provider="mistral",
-                capabilities=["chat"],
-                description="Mistral Small 快速版本",
-            ),
-            # Mixtral 系列
-            ModelInfo(
-                id="mixtral-8x22b-2404",
-                name="Mixtral 8x22B",
-                type="chat",
-                provider="mistral",
-                capabilities=["chat"],
-                description="Mixtral 8x22B MoE 开源模型",
-            ),
-            ModelInfo(
-                id="mixtral-8x7b-2407",
-                name="Mixtral 8x7B",
-                type="chat",
-                provider="mistral",
-                capabilities=["chat"],
-                description="Mixtral 8x7B MoE 开源模型",
-            ),
-            # Codestral 系列
-            ModelInfo(
-                id="codestral-2405",
-                name="Codestral",
-                type="chat",
-                provider="mistral",
-                capabilities=["chat"],
-                description="Codestral 代码专用模型",
-            ),
-            # Mathstral
-            ModelInfo(
-                id="mathstral-2407",
-                name="Mathstral",
-                type="chat",
-                provider="mistral",
-                capabilities=["chat"],
-                description="Mathstral 数学专用模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（OpenAI 兼容端点），不再使用硬编码示例。
+        base_url 已包含 /v1 前缀，故请求路径为 /models。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="mistral",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -1119,61 +995,32 @@ class CohereAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            ModelInfo(
-                id="command-r-plus-08-2024",
-                name="Command R+ 08-2024",
-                type="chat",
-                provider="cohere",
-                capabilities=["chat"],
-                description="Command R+ 104B 企业级 RAG 模型",
-            ),
-            ModelInfo(
-                id="command-r-08-2024",
-                name="Command R 08-2024",
-                type="chat",
-                provider="cohere",
-                capabilities=["chat"],
-                description="Command R 35B RAG 模型",
-            ),
-            ModelInfo(
-                id="command-plus",
-                name="Command Plus",
-                type="chat",
-                provider="cohere",
-                capabilities=["chat"],
-                description="Command Plus 高速版本",
-            ),
-            ModelInfo(
-                id="command",
-                name="Command",
-                type="chat",
-                provider="cohere",
-                capabilities=["chat"],
-                description="Command 通用对话模型",
-            ),
-            ModelInfo(
-                id="c4ai-aya-23-8b",
-                name="Aya 23 8B",
-                type="chat",
-                provider="cohere",
-                capabilities=["chat"],
-                description="Aya 23 8B 多语言模型",
-            ),
-            ModelInfo(
-                id="c4ai-aya-23-35b",
-                name="Aya 23 35B",
-                type="chat",
-                provider="cohere",
-                capabilities=["chat"],
-                description="Aya 23 35B 多语言模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取。Cohere v1 响应中模型列表位于 "models" 键下，
+        且模型 ID 字段名为 "name"（非标准 OpenAI "id"），需预处理转换为统一 "id"
+        字段以复用基类 _parse_models_response 解析逻辑。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        data = response.json()
+        # Cohere v1 用 "name" 作为模型 ID，统一转换为 "id" 字段
+        items = data.get("models", [])
+        for item in items:
+            if "id" not in item and "name" in item:
+                item["id"] = item["name"]
+        return self._parse_models_response(
+            data={"data": items},
+            provider="cohere",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -1423,79 +1270,24 @@ class PerplexityAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Sonar 系列
-            ModelInfo(
-                id="sonar-pro",
-                name="Sonar Pro",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Sonar Pro AI 搜索模型",
-            ),
-            ModelInfo(
-                id="sonar",
-                name="Sonar",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Sonar 标准版 AI 搜索模型",
-            ),
-            ModelInfo(
-                id="sonar-pro-realtime",
-                name="Sonar Pro Realtime",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Sonar Pro 实时搜索",
-            ),
-            ModelInfo(
-                id="sonar-reasoning-pro",
-                name="Sonar Reasoning Pro",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Sonar 推理搜索模型",
-            ),
-            ModelInfo(
-                id="sonar-reasoning",
-                name="Sonar Reasoning",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Sonar 推理模型",
-            ),
-            # Llama Sonar
-            ModelInfo(
-                id="llama-3.1-sonar-small-128k-online",
-                name="Llama 3.1 Sonar Small Online",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Llama 3.1 Sonar 小型联网模型",
-            ),
-            ModelInfo(
-                id="llama-3.1-sonar-large-128k-online",
-                name="Llama 3.1 Sonar Large Online",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Llama 3.1 Sonar 大型联网模型",
-            ),
-            ModelInfo(
-                id="llama-3.1-sonar-huge-128k-online",
-                name="Llama 3.1 Sonar Huge Online",
-                type="chat",
-                provider="perplexity",
-                capabilities=["chat"],
-                description="Llama 3.1 Sonar 超大联网模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（OpenAI 兼容端点），不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="perplexity",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:

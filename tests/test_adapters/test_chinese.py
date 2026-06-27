@@ -2,9 +2,11 @@
 AGN-SDK 中文模型适配器测试
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
-from agn.adapters.chinese import QwenAdapter, ZhipuAdapter, DoubaoAdapter, ErnieAdapter
+from agn.adapters.chinese import DoubaoAdapter, ErnieAdapter, QwenAdapter, ZhipuAdapter
 from agn.models.common import ProviderConfig
 
 
@@ -69,41 +71,98 @@ class TestQwenAdapterListModels:
         config = ProviderConfig(provider_type="qwen", api_key=mock_api_key)
         return QwenAdapter(config=config)
 
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
+
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: QwenAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
+        await adapter.start()
 
-        model_ids = {m.id for m in models}
-        assert "qwen-turbo" in model_ids
-        assert "qwen-plus" in model_ids
-        assert "qwen-max" in model_ids
-        assert "qwen-vl-max" in model_ids
+        mock_result = {
+            "data": [
+                {"id": "qwen-turbo", "name": "Qwen Turbo"},
+                {"id": "qwen-plus", "name": "Qwen Plus"},
+                {"id": "qwen-max", "name": "Qwen Max"},
+                {"id": "qwen-vl-max", "name": "Qwen VL Max"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 4
+            model_ids = {m.id for m in models}
+            assert "qwen-turbo" in model_ids
+            assert "qwen-plus" in model_ids
+            assert "qwen-max" in model_ids
+            assert "qwen-vl-max" in model_ids
+            for model in models:
+                assert model.provider == "qwen"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: QwenAdapter) -> None:
-        """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) > 0
-        for model in models:
-            assert model.type == "chat"
+        """测试获取对话模型（按类型过滤）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "qwen-turbo", "name": "Qwen Turbo"},
+                {"id": "qwen-plus", "name": "Qwen Plus"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 2
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
-    async def test_model_capabilities(self, adapter: QwenAdapter) -> None:
-        """测试模型能力"""
-        models = await adapter.list_models()
-        for model in models:
-            if model.type == "chat":
-                assert (
-                    "chat" in model.capabilities
-                ), f"聊天模型 {model.id} 应该有 chat 能力"
-            elif model.type == "audio":
-                has_audio_cap = (
-                    "audio_transcribe" in model.capabilities
-                    or "audio_speech" in model.capabilities
-                )
-                assert has_audio_cap, f"音频模型 {model.id} 应该有 audio 能力"
+    async def test_model_capabilities_passthrough(self, adapter: QwenAdapter) -> None:
+        """测试模型能力字段透传（/models 返回 capabilities 时应保留）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {
+                    "id": "qwen-vl-max",
+                    "name": "Qwen VL Max",
+                    "capabilities": ["chat", "vision"],
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+            assert len(models) == 1
+            assert "chat" in models[0].capabilities
+            assert "vision" in models[0].capabilities
+
+        await adapter.close()
 
 
 class TestZhipuAdapter:
@@ -167,32 +226,96 @@ class TestZhipuAdapterListModels:
         config = ProviderConfig(provider_type="zhipu", api_key=mock_api_key)
         return ZhipuAdapter(config=config)
 
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
+
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: ZhipuAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
+        await adapter.start()
 
-        model_ids = {m.id for m in models}
-        assert "glm-4" in model_ids
-        assert "glm-4v" in model_ids
-        assert "glm-3-turbo" in model_ids
+        mock_result = {
+            "data": [
+                {"id": "glm-4", "name": "GLM-4"},
+                {"id": "glm-4v", "name": "GLM-4V"},
+                {"id": "glm-3-turbo", "name": "GLM-3 Turbo"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 3
+            model_ids = {m.id for m in models}
+            assert "glm-4" in model_ids
+            assert "glm-4v" in model_ids
+            assert "glm-3-turbo" in model_ids
+            for model in models:
+                assert model.provider == "zhipu"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: ZhipuAdapter) -> None:
-        """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) > 0
-        for model in models:
-            assert model.type == "chat"
+        """测试获取对话模型（按类型过滤）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "glm-4", "name": "GLM-4"},
+                {"id": "glm-3-turbo", "name": "GLM-3 Turbo"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 2
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_vision_model_capabilities(self, adapter: ZhipuAdapter) -> None:
-        """测试视觉模型能力"""
-        models = await adapter.list_models()
-        glm4v = next((m for m in models if m.id == "glm-4v"), None)
-        assert glm4v is not None
-        assert "vision" in glm4v.capabilities
+        """测试视觉模型能力字段透传"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {
+                    "id": "glm-4v",
+                    "name": "GLM-4V",
+                    "capabilities": ["chat", "vision"],
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+            glm4v = next((m for m in models if m.id == "glm-4v"), None)
+            assert glm4v is not None
+            assert "vision" in glm4v.capabilities
+
+        await adapter.close()
 
 
 class TestDoubaoAdapter:
@@ -230,14 +353,68 @@ class TestDoubaoAdapter:
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.video_create(model="test", prompt="A cat")
 
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
+
     @pytest.mark.asyncio
     async def test_list_models(self, adapter: DoubaoAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
-        model_ids = {m.id for m in models}
-        assert "doubao-pro-128k" in model_ids
-        assert "doubao-lite-4k" in model_ids
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "doubao-pro-128k", "name": "Doubao Pro 128K"},
+                {"id": "doubao-lite-4k", "name": "Doubao Lite 4K"},
+                {"id": "doubao-seed-2-0-pro-260215", "name": "Doubao Seed 2.0 Pro"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 3
+            model_ids = {m.id for m in models}
+            assert "doubao-pro-128k" in model_ids
+            assert "doubao-lite-4k" in model_ids
+            for model in models:
+                assert model.provider == "doubao"
+
+        await adapter.close()
+
+    @pytest.mark.asyncio
+    async def test_list_chat_models(self, adapter: DoubaoAdapter) -> None:
+        """测试获取对话模型（按类型过滤）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "doubao-pro-128k", "name": "Doubao Pro 128K"},
+                {"id": "doubao-lite-4k", "name": "Doubao Lite 4K"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 2
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
 
 class TestErnieAdapter:

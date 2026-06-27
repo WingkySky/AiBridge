@@ -2,16 +2,27 @@
 AGN-SDK 额外模型适配器测试 (Grok/Yi/SenseNova/Hunyuan/Groq)
 """
 
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from agn.adapters.additional_models import (
     GrokAdapter,
-    YiAdapter,
-    SenseNovaAdapter,
-    HunyuanAdapter,
     GroqAdapter,
+    HunyuanAdapter,
+    SenseNovaAdapter,
+    YiAdapter,
 )
 from agn.models.common import ProviderConfig
+
+
+def _mock_models_response(json_data: dict[str, Any]) -> MagicMock:
+    """创建模拟 /models HTTP 响应"""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json = MagicMock(return_value=json_data)
+    return mock_resp
 
 
 class TestGrokAdapter:
@@ -48,12 +59,34 @@ class TestGrokAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: GrokAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 5
-        model_ids = {m.id for m in models}
-        assert "grok-3" in model_ids
-        assert "grok-3-latest" in model_ids
-        assert "grok-2" in model_ids
+        """测试实时拉取模型列表（GET /models）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "grok-3", "name": "Grok 3"},
+                {"id": "grok-3-latest"},
+                {"id": "grok-3-mini"},
+                {"id": "grok-2"},
+                {"id": "grok-2-latest"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) >= 5
+            model_ids = {m.id for m in models}
+            assert "grok-3" in model_ids
+            assert "grok-3-latest" in model_ids
+            assert "grok-2" in model_ids
+
+        await adapter.close()
 
 
 class TestYiAdapter:
@@ -89,19 +122,67 @@ class TestYiAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: YiAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 7
-        model_ids = {m.id for m in models}
-        assert "yi-large" in model_ids
-        assert "yi-34b-chat-200k" in model_ids
-        assert "yi-vl-plus" in model_ids
+        """测试实时拉取模型列表（GET /models）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "yi-lightning"},
+                {"id": "yi-medium"},
+                {"id": "yi-34b-chat-0205"},
+                {"id": "yi-34b-chat-200k"},
+                {"id": "yi-vl-plus"},
+                {"id": "yi-large"},
+                {"id": "yi-large-turbo"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) >= 7
+            model_ids = {m.id for m in models}
+            assert "yi-large" in model_ids
+            assert "yi-34b-chat-200k" in model_ids
+            assert "yi-vl-plus" in model_ids
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: YiAdapter) -> None:
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) >= 7
-        for model in models:
-            assert model.type == "chat"
+        """测试按类型过滤模型列表"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "yi-lightning"},
+                {"id": "yi-medium"},
+                {"id": "yi-34b-chat-0205"},
+                {"id": "yi-34b-chat-200k"},
+                {"id": "yi-vl-plus"},
+                {"id": "yi-large"},
+                {"id": "yi-large-turbo"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) >= 7
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
 
 class TestSenseNovaAdapter:
@@ -136,12 +217,36 @@ class TestSenseNovaAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: SenseNovaAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 7
-        model_ids = {m.id for m in models}
-        assert "sensechat" in model_ids
-        assert "sensechat-5" in model_ids
-        assert "sensenova-llm-v3" in model_ids
+        """测试实时拉取模型列表（GET /v1/llm/models，相对路径 ../llm/models）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "sensenova-codex-plus"},
+                {"id": "sensenova-llm-v1"},
+                {"id": "sensenova-llm-v2"},
+                {"id": "sensenova-llm-v3"},
+                {"id": "sensechat"},
+                {"id": "sensechat-4.0"},
+                {"id": "sensechat-5"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="../llm/models")
+            assert len(models) >= 7
+            model_ids = {m.id for m in models}
+            assert "sensechat" in model_ids
+            assert "sensechat-5" in model_ids
+            assert "sensenova-llm-v3" in model_ids
+
+        await adapter.close()
 
 
 class TestHunyuanAdapter:
@@ -177,19 +282,67 @@ class TestHunyuanAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: HunyuanAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 7
-        model_ids = {m.id for m in models}
-        assert "hunyuan-turbo" in model_ids
-        assert "hunyuan-lite" in model_ids
-        assert "hunyuan-vision" in model_ids
+        """测试实时拉取模型列表（GET /models）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "hunyuan-turbo"},
+                {"id": "hunyuan-latest"},
+                {"id": "hunyuan-pro"},
+                {"id": "hunyuan-lite"},
+                {"id": "hunyuan-standard"},
+                {"id": "hunyuan-vision"},
+                {"id": "hunyuan-code"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) >= 7
+            model_ids = {m.id for m in models}
+            assert "hunyuan-turbo" in model_ids
+            assert "hunyuan-lite" in model_ids
+            assert "hunyuan-vision" in model_ids
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: HunyuanAdapter) -> None:
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) >= 7
-        for model in models:
-            assert model.type == "chat"
+        """测试按类型过滤模型列表"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "hunyuan-turbo"},
+                {"id": "hunyuan-latest"},
+                {"id": "hunyuan-pro"},
+                {"id": "hunyuan-lite"},
+                {"id": "hunyuan-standard"},
+                {"id": "hunyuan-vision"},
+                {"id": "hunyuan-code"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) >= 7
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
 
 class TestGroqAdapter:
@@ -224,17 +377,73 @@ class TestGroqAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: GroqAdapter) -> None:
-        models = await adapter.list_models()
-        assert len(models) >= 8
-        model_ids = {m.id for m in models}
-        assert "llama-3.3-70b-versatile" in model_ids
-        assert "llama3-70b-8192" in model_ids
-        assert "mixtral-8x7b-32768" in model_ids
-        assert "gemma2-9b-it" in model_ids
+        """测试实时拉取模型列表（GET /models，含 chat 与 audio 类型）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "llama-3.3-70b-versatile"},
+                {"id": "llama-3.1-70b-versatile"},
+                {"id": "llama-3.1-8b-instant"},
+                {"id": "llama3-70b-8192"},
+                {"id": "llama3-8b-8192"},
+                {"id": "mixtral-8x7b-32768"},
+                {"id": "gemma2-9b-it"},
+                {"id": "gemma-7b-it"},
+                {"id": "whisper-large-v3"},
+                {"id": "whisper-large-v3-turbo"},
+                {"id": "distil-whisper-large-v3-en"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) >= 8
+            model_ids = {m.id for m in models}
+            assert "llama-3.3-70b-versatile" in model_ids
+            assert "llama3-70b-8192" in model_ids
+            assert "mixtral-8x7b-32768" in model_ids
+            assert "gemma2-9b-it" in model_ids
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: GroqAdapter) -> None:
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) >= 8
-        for model in models:
-            assert model.type == "chat"
+        """测试按类型过滤模型列表（whisper 等应被过滤掉）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "llama-3.3-70b-versatile"},
+                {"id": "llama-3.1-70b-versatile"},
+                {"id": "llama-3.1-8b-instant"},
+                {"id": "llama3-70b-8192"},
+                {"id": "llama3-8b-8192"},
+                {"id": "mixtral-8x7b-32768"},
+                {"id": "gemma2-9b-it"},
+                {"id": "gemma-7b-it"},
+                {"id": "whisper-large-v3"},
+                {"id": "whisper-large-v3-turbo"},
+                {"id": "distil-whisper-large-v3-en"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = _mock_models_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) >= 8
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()

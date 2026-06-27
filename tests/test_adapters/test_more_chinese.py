@@ -2,6 +2,8 @@
 AGN-SDK Kimi/MiniMax/VolcengineCV 适配器测试
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from agn.adapters.chinese import KimiAdapter, MiniMaxAdapter
@@ -60,24 +62,75 @@ class TestKimiAdapter:
         assert len(converted) == 1
         assert converted[0]["role"] == "user"
 
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
+
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: KimiAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) >= 6
-        model_ids = {m.id for m in models}
-        assert "moonshot-v1-8k" in model_ids
-        assert "moonshot-v1-128k" in model_ids
-        assert "kimi-k2.5" in model_ids
-        assert "kimi-k2.7-code" in model_ids
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "moonshot-v1-8k", "name": "Moonshot v1 8K"},
+                {"id": "moonshot-v1-32k", "name": "Moonshot v1 32K"},
+                {"id": "moonshot-v1-128k", "name": "Moonshot v1 128K"},
+                {"id": "kimi-k2.5", "name": "Kimi K2.5"},
+                {"id": "kimi-k2.6", "name": "Kimi K2.6"},
+                {"id": "kimi-k2.7-code", "name": "Kimi K2.7 Code"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 6
+            model_ids = {m.id for m in models}
+            assert "moonshot-v1-8k" in model_ids
+            assert "moonshot-v1-128k" in model_ids
+            assert "kimi-k2.5" in model_ids
+            assert "kimi-k2.7-code" in model_ids
+            for model in models:
+                assert model.provider == "kimi"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: KimiAdapter) -> None:
-        """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        assert len(models) >= 6
-        for model in models:
-            assert model.type == "chat"
+        """测试获取对话模型（按类型过滤）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "moonshot-v1-8k", "name": "Moonshot v1 8K"},
+                {"id": "moonshot-v1-128k", "name": "Moonshot v1 128K"},
+                {"id": "kimi-k2.5", "name": "Kimi K2.5"},
+                {"id": "kimi-k2.7-code", "name": "Kimi K2.7 Code"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 4
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
 
 class TestMiniMaxAdapter:

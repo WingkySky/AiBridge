@@ -4,8 +4,9 @@ AGN-SDK 火山引擎方舟 CV 适配器测试
 测试 VolcengineCVAdapter 的各项功能，包括图像生成、视频创建、视频轮询等。
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.volcengine_cv import VolcengineCVAdapter
 from agn.core.errors import UnsupportedCapabilityError

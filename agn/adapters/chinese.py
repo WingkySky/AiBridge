@@ -632,64 +632,25 @@ class QwenAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        """获取可用模型列表"""
-        models = [
-            ModelInfo(
-                id="qwen-turbo",
-                name="Qwen Turbo",
-                type="chat",
-                provider="qwen",
-                capabilities=["chat", "vision"],
-                description="快速响应版本",
-            ),
-            ModelInfo(
-                id="qwen-plus",
-                name="Qwen Plus",
-                type="chat",
-                provider="qwen",
-                capabilities=["chat", "vision"],
-                description="高性能版本",
-            ),
-            ModelInfo(
-                id="qwen-max",
-                name="Qwen Max",
-                type="chat",
-                provider="qwen",
-                capabilities=["chat", "vision"],
-                description="最强性能版本",
-            ),
-            ModelInfo(
-                id="qwen-vl-max",
-                name="Qwen VL Max",
-                type="chat",
-                provider="qwen",
-                capabilities=["chat", "vision"],
-                description="视觉理解最强版本",
-            ),
-            # 语音转文字模型（SenseVoice）
-            ModelInfo(
-                id="sensevoice-v1",
-                name="SenseVoice",
-                type="audio",
-                provider="qwen",
-                capabilities=["audio_transcribe"],
-                description="阿里通义 SenseVoice 多语言语音识别",
-            ),
-            # 文字转语音模型（CosyVoice）
-            ModelInfo(
-                id="cosyvoice-v1",
-                name="CosyVoice",
-                type="audio",
-                provider="qwen",
-                capabilities=["audio_speech"],
-                description="阿里通义 CosyVoice 语音合成",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（DashScope OpenAI 兼容模式），
+        不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video/audio）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="qwen",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         """处理错误响应"""
@@ -915,37 +876,25 @@ class ZhipuAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            ModelInfo(
-                id="glm-4",
-                name="GLM-4",
-                type="chat",
-                provider="zhipu",
-                capabilities=["chat", "vision"],
-                description="智谱 GLM-4 对话模型",
-            ),
-            ModelInfo(
-                id="glm-4v",
-                name="GLM-4V",
-                type="chat",
-                provider="zhipu",
-                capabilities=["chat", "vision"],
-                description="智谱 GLM-4V 视觉模型",
-            ),
-            ModelInfo(
-                id="glm-3-turbo",
-                name="GLM-3 Turbo",
-                type="chat",
-                provider="zhipu",
-                capabilities=["chat"],
-                description="智谱 GLM-3 Turbo 快速版本",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（智谱 GLM OpenAI 兼容模式），
+        不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video/audio）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="zhipu",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -1175,122 +1124,25 @@ class DoubaoAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # 豆包 Pro 系列
-            ModelInfo(
-                id="doubao-pro-4k",
-                name="Doubao Pro 4K",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 Pro 4K 上下文",
-            ),
-            ModelInfo(
-                id="doubao-pro-32k",
-                name="Doubao Pro 32K",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 Pro 32K 上下文",
-            ),
-            ModelInfo(
-                id="doubao-pro-128k",
-                name="Doubao Pro 128K",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 Pro 128K 上下文",
-            ),
-            ModelInfo(
-                id="doubao-pro-256k",
-                name="Doubao Pro 256K",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 Pro 256K 上下文",
-            ),
-            # 豆包 Lite 系列
-            ModelInfo(
-                id="doubao-lite-4k",
-                name="Doubao Lite 4K",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat"],
-                description="豆包 Lite 快速版本 4K",
-            ),
-            ModelInfo(
-                id="doubao-lite-32k",
-                name="Doubao Lite 32K",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat"],
-                description="豆包 Lite 快速版本 32K",
-            ),
-            ModelInfo(
-                id="doubao-lite-128k",
-                name="Doubao Lite 128K",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat"],
-                description="豆包 Lite 快速版本 128K",
-            ),
-            # Doubao Seed 系列 (旗舰 Agent 模型)
-            ModelInfo(
-                id="doubao-seed-2-0-lite-260215",
-                name="Doubao Seed 2.0 Lite",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 Seed 2.0 Lite，支持深度思考",
-            ),
-            ModelInfo(
-                id="doubao-seed-2-0-pro-260215",
-                name="Doubao Seed 2.0 Pro",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 Seed 2.0 Pro，旗舰 Agent 模型",
-            ),
-            ModelInfo(
-                id="doubao-seed-2-0-mini-260428",
-                name="Doubao Seed 2.0 Mini",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 Seed 2.0 Mini",
-            ),
-            ModelInfo(
-                id="doubao-2-1-pro",
-                name="Doubao 2.1 Pro",
-                type="chat",
-                provider="doubao",
-                capabilities=["chat", "vision"],
-                description="豆包 2.1 Pro 最新模型",
-            ),
-            # 语音转文字模型
-            ModelInfo(
-                id="doubao-asr",
-                name="豆包语音识别",
-                type="audio",
-                provider="doubao",
-                capabilities=["audio_transcribe"],
-                description="豆包语音识别模型（中文优化）",
-            ),
-            # 文字转语音模型
-            ModelInfo(
-                id="doubao-tts",
-                name="豆包语音合成",
-                type="audio",
-                provider="doubao",
-                capabilities=["audio_speech"],
-                description="豆包语音合成模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（豆包 OpenAI 兼容模式），
+        不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video/audio）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="doubao",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -1567,6 +1419,15 @@ class ErnieAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
+        """
+        获取可用模型列表
+
+        NOTE: 该 Provider 无标准 /models 端点，暂保留硬编码列表。
+        百度千帆 modellist 端点（/rpc/2.0/ai_custom/v1/wenxinworkshop/modellist）
+        响应结构非标准（result.model_list，字段为 code/name），不符合
+        _parse_models_response 期望的 {"data":[{"id":...}]} 格式，故保留硬编码。
+        """
+        # 保留硬编码：百度千帆 modellist 响应结构非 OpenAI 兼容，无法复用基类解析
         models = [
             ModelInfo(
                 id="completions_pro",
@@ -1842,61 +1703,25 @@ class KimiAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            ModelInfo(
-                id="moonshot-v1-8k",
-                name="Moonshot v1 8K",
-                type="chat",
-                provider="kimi",
-                capabilities=["chat"],
-                description="Kimi 8K 上下文版本",
-            ),
-            ModelInfo(
-                id="moonshot-v1-32k",
-                name="Moonshot v1 32K",
-                type="chat",
-                provider="kimi",
-                capabilities=["chat"],
-                description="Kimi 32K 上下文版本",
-            ),
-            ModelInfo(
-                id="moonshot-v1-128k",
-                name="Moonshot v1 128K",
-                type="chat",
-                provider="kimi",
-                capabilities=["chat"],
-                description="Kimi 128K 长上下文版本",
-            ),
-            ModelInfo(
-                id="kimi-k2.5",
-                name="Kimi K2.5",
-                type="chat",
-                provider="kimi",
-                capabilities=["chat", "vision"],
-                description="Kimi K2.5 最新旗舰模型，支持视觉",
-            ),
-            ModelInfo(
-                id="kimi-k2.6",
-                name="Kimi K2.6",
-                type="chat",
-                provider="kimi",
-                capabilities=["chat", "vision"],
-                description="Kimi K2.6 最新模型，256K上下文",
-            ),
-            ModelInfo(
-                id="kimi-k2.7-code",
-                name="Kimi K2.7 Code",
-                type="chat",
-                provider="kimi",
-                capabilities=["chat", "vision"],
-                description="Kimi K2.7 Code 代码专用模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取（Kimi OpenAI 兼容模式），
+        不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video/audio）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="kimi",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -2138,6 +1963,13 @@ class MiniMaxAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
+        """
+        获取可用模型列表
+
+        NOTE: 该 Provider 无标准 /models 端点，暂保留硬编码列表。
+        MiniMax OpenAI 兼容接口未公开稳定的 /models 列表端点，故保留硬编码。
+        """
+        # 保留硬编码：MiniMax 无可靠的 /models 端点
         models = [
             ModelInfo(
                 id="abab6.5s-chat",

@@ -4,8 +4,9 @@ AGN-SDK Azure 适配器测试
 测试 AzureAdapter 的各项功能，包括 chat、image_generate 等。
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.azure import AzureAdapter
 from agn.models.chat import ChatCompletion, ChatMessage
@@ -86,15 +87,99 @@ class TestAzureAdapterListModels:
         )
         return AzureAdapter(config=config)
 
-    @pytest.mark.asyncio
-    async def test_list_models(self, adapter: AzureAdapter) -> None:
-        """测试获取模型列表"""
-        models = await adapter.list_models()
-        assert len(models) > 0
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
 
-        types = {m.type for m in models}
-        assert "chat" in types
-        assert "image" in types
+    @pytest.mark.asyncio
+    async def test_list_all_models(self, adapter: AzureAdapter) -> None:
+        """测试获取所有部署模型"""
+        await adapter.start()
+
+        # Azure 部署列表响应：id 是部署名，model 是底层模型名
+        mock_result = {
+            "data": [
+                {
+                    "id": "my-deployment",
+                    "model": "gpt-4o",
+                    "status": "succeeded",
+                },
+                {
+                    "id": "image-deployment",
+                    "model": "dall-e-3",
+                    "status": "succeeded",
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            # 验证调用了部署列表端点并带 api-version 参数
+            mock_get.assert_called_once_with(
+                url="/openai/deployments",
+                params={"api-version": adapter.api_version},
+            )
+            assert len(models) == 2
+            types = {m.type for m in models}
+            assert "chat" in types
+            assert "image" in types
+
+        await adapter.close()
+
+    @pytest.mark.asyncio
+    async def test_list_chat_models(self, adapter: AzureAdapter) -> None:
+        """测试按类型过滤对话模型"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "my-deployment", "model": "gpt-4o", "status": "succeeded"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
+
+    @pytest.mark.asyncio
+    async def test_list_uses_model_field_for_id(self, adapter: AzureAdapter) -> None:
+        """测试使用 model 字段作为模型 ID，id 字段作为显示名"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "my-deployment", "model": "gpt-4o", "status": "succeeded"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+            assert len(models) == 1
+            # model 字段作为 id（用于推断类型）
+            assert models[0].id == "gpt-4o"
+            # id 字段作为显示名
+            assert models[0].name == "my-deployment"
+
+        await adapter.close()
 
 
 class TestAzureAdapterChatMockHTTP:

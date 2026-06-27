@@ -191,53 +191,24 @@ class GrokAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            ModelInfo(
-                id="grok-3",
-                name="Grok 3",
-                type="chat",
-                provider="grok",
-                capabilities=["chat", "vision"],
-                description="Grok 3 旗舰模型",
-            ),
-            ModelInfo(
-                id="grok-3-latest",
-                name="Grok 3 Latest",
-                type="chat",
-                provider="grok",
-                capabilities=["chat", "vision"],
-                description="Grok 3 最新版本",
-            ),
-            ModelInfo(
-                id="grok-3-mini",
-                name="Grok 3 Mini",
-                type="chat",
-                provider="grok",
-                capabilities=["chat", "vision"],
-                description="Grok 3 Mini 快速版本",
-            ),
-            ModelInfo(
-                id="grok-2",
-                name="Grok 2",
-                type="chat",
-                provider="grok",
-                capabilities=["chat", "vision"],
-                description="Grok 2 模型",
-            ),
-            ModelInfo(
-                id="grok-2-latest",
-                name="Grok 2 Latest",
-                type="chat",
-                provider="grok",
-                capabilities=["chat", "vision"],
-                description="Grok 2 最新版本",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取，不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="grok",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -476,73 +447,24 @@ class YiAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Yi 最新系列
-            ModelInfo(
-                id="yi-lightning",
-                name="Yi Lightning",
-                type="chat",
-                provider="yi",
-                capabilities=["chat"],
-                description="Yi Lightning 极速版",
-            ),
-            ModelInfo(
-                id="yi-medium",
-                name="Yi Medium",
-                type="chat",
-                provider="yi",
-                capabilities=["chat"],
-                description="Yi Medium 中量级",
-            ),
-            # Yi 34B 系列
-            ModelInfo(
-                id="yi-34b-chat-0205",
-                name="Yi 34B Chat 0205",
-                type="chat",
-                provider="yi",
-                capabilities=["chat"],
-                description="Yi 34B Chat 模型",
-            ),
-            ModelInfo(
-                id="yi-34b-chat-200k",
-                name="Yi 34B Chat 200K",
-                type="chat",
-                provider="yi",
-                capabilities=["chat"],
-                description="Yi 34B Chat 200K 长上下文",
-            ),
-            # Yi 视觉系列
-            ModelInfo(
-                id="yi-vl-plus",
-                name="Yi VL Plus",
-                type="chat",
-                provider="yi",
-                capabilities=["chat", "vision"],
-                description="Yi VL Plus 视觉理解模型",
-            ),
-            # Yi 最新大模型
-            ModelInfo(
-                id="yi-large",
-                name="Yi Large",
-                type="chat",
-                provider="yi",
-                capabilities=["chat", "vision"],
-                description="Yi Large 旗舰模型",
-            ),
-            ModelInfo(
-                id="yi-large-turbo",
-                name="Yi Large Turbo",
-                type="chat",
-                provider="yi",
-                capabilities=["chat", "vision"],
-                description="Yi Large Turbo 旗舰快速版",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取，不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="yi",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -779,69 +701,26 @@ class SenseNovaAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            ModelInfo(
-                id="sensenova-codex-plus",
-                name="SenseNova Codex Plus",
-                type="chat",
-                provider="sensenova",
-                capabilities=["chat", "vision"],
-                description="商汤日日新 Codex Plus 代码模型",
-            ),
-            ModelInfo(
-                id="sensenova-llm-v1",
-                name="SenseNova LLM v1",
-                type="chat",
-                provider="sensenova",
-                capabilities=["chat"],
-                description="商汤日日新大模型 v1",
-            ),
-            ModelInfo(
-                id="sensenova-llm-v2",
-                name="SenseNova LLM v2",
-                type="chat",
-                provider="sensenova",
-                capabilities=["chat"],
-                description="商汤日日新大模型 v2",
-            ),
-            ModelInfo(
-                id="sensenova-llm-v3",
-                name="SenseNova LLM v3",
-                type="chat",
-                provider="sensenova",
-                capabilities=["chat", "vision"],
-                description="商汤日日新大模型 v3",
-            ),
-            ModelInfo(
-                id="sensechat",
-                name="SenseChat",
-                type="chat",
-                provider="sensenova",
-                capabilities=["chat"],
-                description="商汤商量大模型",
-            ),
-            ModelInfo(
-                id="sensechat-4.0",
-                name="SenseChat 4.0",
-                type="chat",
-                provider="sensenova",
-                capabilities=["chat", "vision"],
-                description="商汤商量 4.0",
-            ),
-            ModelInfo(
-                id="sensechat-5",
-                name="SenseChat 5",
-                type="chat",
-                provider="sensenova",
-                capabilities=["chat", "vision"],
-                description="商汤商量 5.0 最新旗舰",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /v1/llm/models 实时拉取，不再使用硬编码示例。
+        base_url 为 /v1/cc-switch（chat 端点），故使用相对路径 ../llm/models
+        回退到 /v1/llm/models。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="../llm/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="sensenova",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -1080,73 +959,24 @@ class HunyuanAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # 混元最新系列
-            ModelInfo(
-                id="hunyuan-turbo",
-                name="Hunyuan Turbo",
-                type="chat",
-                provider="hunyuan",
-                capabilities=["chat", "vision"],
-                description="腾讯混元 Turbo 旗舰模型",
-            ),
-            ModelInfo(
-                id="hunyuan-latest",
-                name="Hunyuan Latest",
-                type="chat",
-                provider="hunyuan",
-                capabilities=["chat", "vision"],
-                description="腾讯混元最新版",
-            ),
-            ModelInfo(
-                id="hunyuan-pro",
-                name="Hunyuan Pro",
-                type="chat",
-                provider="hunyuan",
-                capabilities=["chat", "vision"],
-                description="腾讯混元 Pro 专业版",
-            ),
-            # 混元 Lite 系列
-            ModelInfo(
-                id="hunyuan-lite",
-                name="Hunyuan Lite",
-                type="chat",
-                provider="hunyuan",
-                capabilities=["chat"],
-                description="腾讯混元 Lite 轻量版 250K 上下文",
-            ),
-            ModelInfo(
-                id="hunyuan-standard",
-                name="Hunyuan Standard",
-                type="chat",
-                provider="hunyuan",
-                capabilities=["chat"],
-                description="腾讯混元标准版",
-            ),
-            # 混元视觉
-            ModelInfo(
-                id="hunyuan-vision",
-                name="Hunyuan Vision",
-                type="chat",
-                provider="hunyuan",
-                capabilities=["chat", "vision"],
-                description="腾讯混元视觉理解模型",
-            ),
-            # 混元代码
-            ModelInfo(
-                id="hunyuan-code",
-                name="Hunyuan Code",
-                type="chat",
-                provider="hunyuan",
-                capabilities=["chat"],
-                description="腾讯混元代码模型",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取，不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="hunyuan",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -1393,105 +1223,24 @@ class GroqAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Llama 系列
-            ModelInfo(
-                id="llama-3.3-70b-versatile",
-                name="Llama 3.3 70B Versatile",
-                type="chat",
-                provider="groq",
-                capabilities=["chat", "vision"],
-                description="Llama 3.3 70B 多功能模型",
-            ),
-            ModelInfo(
-                id="llama-3.1-70b-versatile",
-                name="Llama 3.1 70B Versatile",
-                type="chat",
-                provider="groq",
-                capabilities=["chat"],
-                description="Llama 3.1 70B 多功能模型",
-            ),
-            ModelInfo(
-                id="llama-3.1-8b-instant",
-                name="Llama 3.1 8B Instant",
-                type="chat",
-                provider="groq",
-                capabilities=["chat"],
-                description="Llama 3.1 8B 极速版",
-            ),
-            ModelInfo(
-                id="llama3-70b-8192",
-                name="Llama 3 70B",
-                type="chat",
-                provider="groq",
-                capabilities=["chat"],
-                description="Llama 3 70B 8K 上下文",
-            ),
-            ModelInfo(
-                id="llama3-8b-8192",
-                name="Llama 3 8B",
-                type="chat",
-                provider="groq",
-                capabilities=["chat"],
-                description="Llama 3 8B 8K 上下文",
-            ),
-            # Mixtral 系列
-            ModelInfo(
-                id="mixtral-8x7b-32768",
-                name="Mixtral 8x7B 32K",
-                type="chat",
-                provider="groq",
-                capabilities=["chat"],
-                description="Mixtral 8x7B MoE 32K 上下文",
-            ),
-            # Gemma 系列
-            ModelInfo(
-                id="gemma2-9b-it",
-                name="Gemma 2 9B IT",
-                type="chat",
-                provider="groq",
-                capabilities=["chat"],
-                description="Gemma 2 9B 指令微调",
-            ),
-            ModelInfo(
-                id="gemma-7b-it",
-                name="Gemma 7B IT",
-                type="chat",
-                provider="groq",
-                capabilities=["chat"],
-                description="Gemma 7B 指令微调",
-            ),
-            # 语音模型 (Whisper - LPU 极速推理)
-            ModelInfo(
-                id="whisper-large-v3",
-                name="Whisper Large v3",
-                type="audio",
-                provider="groq",
-                capabilities=["audio_transcribe", "audio_translate"],
-                description="OpenAI Whisper Large v3，Groq LPU 极速推理",
-            ),
-            ModelInfo(
-                id="whisper-large-v3-turbo",
-                name="Whisper Large v3 Turbo",
-                type="audio",
-                provider="groq",
-                capabilities=["audio_transcribe", "audio_translate"],
-                description="Whisper Large v3 Turbo 极速版",
-            ),
-            ModelInfo(
-                id="distil-whisper-large-v3-en",
-                name="Distil-Whisper Large v3 (English)",
-                type="audio",
-                provider="groq",
-                capabilities=["audio_transcribe"],
-                description="Distil-Whisper 英语蒸馏版，更快速度",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取，不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="groq",
+            model_type=model_type,
+        )
 
     async def speech(
         self,

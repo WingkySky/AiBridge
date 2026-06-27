@@ -2,8 +2,9 @@
 AGN-SDK Google Gemini 适配器测试
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.gemini import GeminiAdapter
 from agn.models.chat import ChatMessage
@@ -73,21 +74,105 @@ class TestGeminiAdapterListModels:
         config = ProviderConfig(provider_type="gemini", api_key=mock_api_key)
         return GeminiAdapter(config=config)
 
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
+
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: GeminiAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
+        await adapter.start()
 
-        types = {m.type for m in models}
-        assert "chat" in types
+        # Gemini /models 端点响应：模型列表在 "models" 键下，
+        # id 在 "name" 字段且带 "models/" 前缀，显示名在 "displayName"
+        mock_result = {
+            "models": [
+                {
+                    "name": "models/gemini-2.5-pro",
+                    "displayName": "Gemini 2.5 Pro",
+                    "supportedGenerationMethods": ["generateContent"],
+                },
+                {
+                    "name": "models/gemini-2.5-flash",
+                    "displayName": "Gemini 2.5 Flash",
+                    "supportedGenerationMethods": ["generateContent"],
+                },
+                {
+                    "name": "models/imagen-3.0-generate-001",
+                    "displayName": "Imagen 3",
+                    "supportedGenerationMethods": ["predict"],
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            # 验证调用了 /models 端点
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 3
+
+            # 验证 "models/" 前缀已去掉
+            ids = {m.id for m in models}
+            assert "gemini-2.5-pro" in ids
+            assert "gemini-2.5-flash" in ids
+            assert "imagen-3.0-generate-001" in ids
+            # 确保前缀未被保留
+            assert all(not m.id.startswith("models/") for m in models)
+
+            # 验证 displayName 被用作 name
+            names = {m.id: m.name for m in models}
+            assert names["gemini-2.5-pro"] == "Gemini 2.5 Pro"
+            assert names["imagen-3.0-generate-001"] == "Imagen 3"
+
+            # 验证 provider 标识与类型推断
+            assert all(m.provider == "gemini" for m in models)
+            types = {m.id: m.type for m in models}
+            assert types["gemini-2.5-pro"] == "chat"
+            assert types["imagen-3.0-generate-001"] == "image"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: GeminiAdapter) -> None:
-        """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        for model in models:
-            assert model.type == "chat"
+        """测试按类型过滤对话模型"""
+        await adapter.start()
+
+        # 同一批响应中包含 chat 与 image 类型，过滤后应仅保留 chat
+        mock_result = {
+            "models": [
+                {"name": "models/gemini-2.5-pro", "displayName": "Gemini 2.5 Pro"},
+                {"name": "models/gemini-2.5-flash", "displayName": "Gemini 2.5 Flash"},
+                {
+                    "name": "models/imagen-3.0-generate-001",
+                    "displayName": "Imagen 3",
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            # 过滤后只剩两个对话模型，imagen 被排除
+            assert len(models) == 2
+            for model in models:
+                assert model.type == "chat"
+                assert "imagen" not in model.id
+            ids = {m.id for m in models}
+            assert ids == {"gemini-2.5-pro", "gemini-2.5-flash"}
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_image_not_supported(self, adapter: GeminiAdapter) -> None:

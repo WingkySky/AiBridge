@@ -4,8 +4,9 @@ AGN-SDK Pika 适配器测试
 测试 PikaAdapter 的各项功能，包括视频创建、视频轮询、错误处理等。
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.pika import PikaAdapter
 from agn.core.errors import UnsupportedCapabilityError
@@ -52,7 +53,6 @@ class TestPikaAdapter:
     @pytest.mark.asyncio
     async def test_chat_not_supported(self, adapter: PikaAdapter) -> None:
         """测试文本对话不支持"""
-        from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.chat(
@@ -63,7 +63,6 @@ class TestPikaAdapter:
     @pytest.mark.asyncio
     async def test_image_generate_not_supported(self, adapter: PikaAdapter) -> None:
         """测试图像生成不支持"""
-        from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.image_generate(

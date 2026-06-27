@@ -2,8 +2,9 @@
 AGN-SDK Anthropic 适配器测试
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.anthropic import AnthropicAdapter
 from agn.models.chat import ChatMessage
@@ -73,21 +74,98 @@ class TestAnthropicAdapterListModels:
         config = ProviderConfig(provider_type="anthropic", api_key=mock_api_key)
         return AnthropicAdapter(config=config)
 
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
+
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: AnthropicAdapter) -> None:
-        """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
+        """测试获取所有模型（实时拉取 /v1/models）"""
+        await adapter.start()
 
-        types = {m.type for m in models}
-        assert "chat" in types
+        # Anthropic /v1/models 响应使用 display_name 字段
+        mock_result = {
+            "data": [
+                {
+                    "id": "claude-3-opus-20240229",
+                    "display_name": "Claude 3 Opus",
+                    "type": "model",
+                },
+                {
+                    "id": "claude-3-5-sonnet-20241022",
+                    "display_name": "Claude 3.5 Sonnet",
+                    "type": "model",
+                },
+                {
+                    "id": "claude-3-5-haiku-20241022",
+                    "display_name": "Claude 3.5 Haiku",
+                    "type": "model",
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            # 验证调用了 /v1/models 端点
+            mock_get.assert_called_once_with(url="/v1/models")
+            assert len(models) == 3
+            # 验证 provider 字段被正确设置
+            for model in models:
+                assert model.provider == "anthropic"
+            # 验证 display_name 被解析为 name
+            ids = {m.id for m in models}
+            assert "claude-3-opus-20240229" in ids
+            assert "claude-3-5-sonnet-20241022" in ids
+            names = {m.name for m in models}
+            assert "Claude 3 Opus" in names
+            # Anthropic 模型 id 均被推断为 chat 类型
+            types = {m.type for m in models}
+            assert "chat" in types
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: AnthropicAdapter) -> None:
-        """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        for model in models:
-            assert model.type == "chat"
+        """测试获取对话模型（按 model_type 过滤）"""
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {
+                    "id": "claude-3-opus-20240229",
+                    "display_name": "Claude 3 Opus",
+                    "type": "model",
+                },
+                {
+                    "id": "claude-3-5-sonnet-20241022",
+                    "display_name": "Claude 3.5 Sonnet",
+                    "type": "model",
+                },
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+
+            mock_get.assert_called_once_with(url="/v1/models")
+            # Anthropic 所有 claude-* 模型均会被推断为 chat 类型
+            for model in models:
+                assert model.type == "chat"
+            assert len(models) == 2
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_image_not_supported(self, adapter: AnthropicAdapter) -> None:

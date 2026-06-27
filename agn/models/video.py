@@ -65,6 +65,14 @@ class VideoGenerationOptions(BaseModel):
     )
     seed: int | None = Field(None, description="随机种子（可选）")
     negative_prompt: str | None = Field(None, description="负面提示词")
+    # 以下为部分模型（如火山引擎 Seedance、Agnes 等）使用的参数
+    duration: int | None = Field(
+        None, description="视频时长（秒），部分模型用此字段替代 num_frames"
+    )
+    aspect_ratio: str | None = Field(
+        None, description="宽高比，如 '16:9' / '9:16' / '1:1'"
+    )
+    resolution: str | None = Field(None, description="分辨率档位，如 '720p' / '1080p'")
 
     model_config = {"extra": "allow"}
 

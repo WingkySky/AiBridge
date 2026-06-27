@@ -4,8 +4,9 @@ AGN-SDK Runway 适配器测试
 测试 RunwayAdapter 的各项功能，包括视频创建、视频轮询、错误处理等。
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.runway import RunwayAdapter
 from agn.core.errors import UnsupportedCapabilityError
@@ -52,7 +53,6 @@ class TestRunwayAdapter:
     @pytest.mark.asyncio
     async def test_chat_not_supported(self, adapter: RunwayAdapter) -> None:
         """测试文本对话不支持"""
-        from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.chat(
@@ -63,7 +63,6 @@ class TestRunwayAdapter:
     @pytest.mark.asyncio
     async def test_image_generate_not_supported(self, adapter: RunwayAdapter) -> None:
         """测试图像生成不支持"""
-        from agn.core.errors import UnsupportedCapabilityError
 
         with pytest.raises(UnsupportedCapabilityError):
             await adapter.image_generate(

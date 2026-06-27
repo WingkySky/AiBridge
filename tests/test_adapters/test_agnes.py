@@ -2,8 +2,9 @@
 AGN-SDK Agnes 适配器测试
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.agnes import AgnesAdapter
 from agn.models.chat import ChatMessage
@@ -68,45 +69,119 @@ class TestAgnesAdapterListModels:
 
     @pytest.fixture
     def adapter(self, mock_api_key: str) -> AgnesAdapter:
-        """创建适配器实例"""
+        """创建已启动的适配器"""
         config = ProviderConfig(
             provider_type="agnes",
             api_key=mock_api_key,
+            base_url="https://api.test.agnes.ai/v1",
         )
         return AgnesAdapter(config=config)
+
+    def _mock_response(self, json_data: dict) -> MagicMock:
+        """创建模拟 HTTP 响应"""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json = MagicMock(return_value=json_data)
+        return mock_resp
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: AgnesAdapter) -> None:
         """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) > 0
+        await adapter.start()
 
-        # 检查模型类型覆盖
-        types = {m.type for m in models}
-        assert "chat" in types
-        assert "image" in types
-        assert "video" in types
+        mock_result = {
+            "data": [
+                {"id": "claude-3-sonnet", "name": "Claude 3 Sonnet"},
+                {"id": "gpt-4o", "name": "GPT-4o"},
+                {"id": "flux-pro", "name": "Flux Pro", "capabilities": ["text2image"]},
+                {"id": "agnes-video-1", "name": "Agnes Video 1"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models()
+
+            mock_get.assert_called_once_with(url="/models")
+            assert len(models) == 4
+            types = {m.type for m in models}
+            assert "chat" in types
+            assert "image" in types
+            assert "video" in types
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models(self, adapter: AgnesAdapter) -> None:
         """测试获取对话模型"""
-        models = await adapter.list_models(model_type="chat")
-        for model in models:
-            assert model.type == "chat"
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "claude-3-sonnet", "name": "Claude 3 Sonnet"},
+                {"id": "gpt-4o", "name": "GPT-4o"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="chat")
+            for model in models:
+                assert model.type == "chat"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_image_models(self, adapter: AgnesAdapter) -> None:
         """测试获取图像模型"""
-        models = await adapter.list_models(model_type="image")
-        for model in models:
-            assert model.type == "image"
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "flux-pro", "name": "Flux Pro"},
+                {"id": "seedream-3", "name": "Seedream 3"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="image")
+            for model in models:
+                assert model.type == "image"
+
+        await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_video_models(self, adapter: AgnesAdapter) -> None:
         """测试获取视频模型"""
-        models = await adapter.list_models(model_type="video")
-        for model in models:
-            assert model.type == "video"
+        await adapter.start()
+
+        mock_result = {
+            "data": [
+                {"id": "agnes-video-1", "name": "Agnes Video 1"},
+                {"id": "seedance-1", "name": "Seedance 1"},
+            ]
+        }
+
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = self._mock_response(mock_result)
+
+            models = await adapter.list_models(model_type="video")
+            for model in models:
+                assert model.type == "video"
+
+        await adapter.close()
 
 
 class TestAgnesAdapterChat:
@@ -474,7 +549,7 @@ class TestAgnesAdapterVideo:
             # 验证请求
             mock_post.assert_called_once()
             call_kwargs = mock_post.call_args
-            assert call_kwargs.kwargs["url"] == "/videos/generations"
+            assert call_kwargs.kwargs["url"] == "/videos"
             assert call_kwargs.kwargs["json"]["model"] == "video-model-v1"
             assert call_kwargs.kwargs["json"]["prompt"] == sample_video_prompt
             assert call_kwargs.kwargs["json"]["width"] == 768
@@ -500,17 +575,13 @@ class TestAgnesAdapterVideo:
             "updated": 1700000010,
         }
 
-        # video_poll 内部创建新的 AsyncHttpClient，需要 mock 整个类
-        mock_client_instance = MagicMock()
-        mock_client_instance.start = AsyncMock()
-        mock_client_instance.close = AsyncMock()
-        mock_client_instance.get = AsyncMock(
-            return_value=self._mock_response(mock_result)
-        )
+        mock_response = self._mock_response(mock_result)
 
-        with patch(
-            "agn.adapters.agnes.AsyncHttpClient", return_value=mock_client_instance
-        ):
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = mock_response
+
             from agn.models.video import VideoStatus
 
             result = await adapter.video_poll(
@@ -518,10 +589,10 @@ class TestAgnesAdapterVideo:
                 model="video-model-v1",
             )
 
-            # 验证请求
-            mock_client_instance.get.assert_called_once()
-            call_kwargs = mock_client_instance.get.call_args
-            assert "/videos/generations/vid-abc123" in call_kwargs.kwargs["url"]
+            # 验证请求路径
+            mock_get.assert_called_once()
+            call_kwargs = mock_get.call_args
+            assert "/videos/vid-abc123" in call_kwargs.kwargs["url"]
 
             # 验证响应
             assert isinstance(result, VideoStatus)
@@ -546,16 +617,13 @@ class TestAgnesAdapterVideo:
             "updated": 1700000100,
         }
 
-        mock_client_instance = MagicMock()
-        mock_client_instance.start = AsyncMock()
-        mock_client_instance.close = AsyncMock()
-        mock_client_instance.get = AsyncMock(
-            return_value=self._mock_response(mock_result)
-        )
+        mock_response = self._mock_response(mock_result)
 
-        with patch(
-            "agn.adapters.agnes.AsyncHttpClient", return_value=mock_client_instance
-        ):
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = mock_response
+
             result = await adapter.video_poll(task_id="vid-abc123")
 
             assert result.status == "success"
@@ -576,16 +644,13 @@ class TestAgnesAdapterVideo:
             "updated": 1700000050,
         }
 
-        mock_client_instance = MagicMock()
-        mock_client_instance.start = AsyncMock()
-        mock_client_instance.close = AsyncMock()
-        mock_client_instance.get = AsyncMock(
-            return_value=self._mock_response(mock_result)
-        )
+        mock_response = self._mock_response(mock_result)
 
-        with patch(
-            "agn.adapters.agnes.AsyncHttpClient", return_value=mock_client_instance
-        ):
+        with patch.object(
+            adapter._http_client, "get", new_callable=AsyncMock
+        ) as mock_get:
+            mock_get.return_value = mock_response
+
             result = await adapter.video_poll(task_id="vid-failed")
 
             assert result.status == "failed"

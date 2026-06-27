@@ -335,92 +335,23 @@ class AnthropicAdapter(BaseAdapter):
         """
         获取可用模型列表
 
+        调用 GET /v1/models 实时拉取，不再使用硬编码示例。
+        Anthropic /models 响应使用 display_name 字段（非 name），
+        _parse_models_response 已兼容 display_name。
+
         Args:
-            model_type: 模型类型过滤
+            model_type: 模型类型过滤（chat/image/video）
 
         Returns:
             模型信息列表
         """
-        models = [
-            ModelInfo(
-                id="claude-3-opus-20240229",
-                name="Claude 3 Opus",
-                type="chat",
-                provider="anthropic",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "streaming",
-                    "thinking",
-                ],
-                description="Claude 3 Opus - 最强大的模型",
-            ),
-            ModelInfo(
-                id="claude-3-sonnet-20240229",
-                name="Claude 3 Sonnet",
-                type="chat",
-                provider="anthropic",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "streaming",
-                    "thinking",
-                ],
-                description="Claude 3 Sonnet - 平衡性能和速度",
-            ),
-            ModelInfo(
-                id="claude-3-haiku-20240307",
-                name="Claude 3 Haiku",
-                type="chat",
-                provider="anthropic",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "streaming",
-                ],
-                description="Claude 3 Haiku - 最快的模型",
-            ),
-            ModelInfo(
-                id="claude-3-5-sonnet-20241022",
-                name="Claude 3.5 Sonnet",
-                type="chat",
-                provider="anthropic",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "streaming",
-                    "thinking",
-                ],
-                description="Claude 3.5 Sonnet - 最新高性能模型",
-            ),
-            ModelInfo(
-                id="claude-3-5-haiku-20241022",
-                name="Claude 3.5 Haiku",
-                type="chat",
-                provider="anthropic",
-                capabilities=[
-                    "chat",
-                    "vision",
-                    "tool_call",
-                    "function_call",
-                    "streaming",
-                ],
-                description="Claude 3.5 Haiku - 最新快速模型",
-            ),
-        ]
-
-        if model_type:
-            models = [m for m in models if m.type == model_type]
-
-        return models
+        client = self._get_client()
+        response = await client.get(url="/v1/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="anthropic",
+            model_type=model_type,
+        )
 
     # ==================== 响应解析 ====================
 

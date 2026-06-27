@@ -394,80 +394,36 @@ class AzureAdapter(OpenAIAdapter):
         """
         获取可用模型列表
 
-        Azure 的模型列表取决于部署，这里返回常见的 Azure 部署模型。
+        调用 Azure 部署列表 API 实时拉取已部署的模型，不再使用硬编码示例。
+        端点：GET /openai/deployments?api-version=...
+
+        Azure 部署列表响应中 "id" 是部署名、"model" 才是底层模型名，
+        因此使用 "model" 字段作为模型 ID 用于推断类型，"id" 作为显示名。
 
         Args:
-            model_type: 模型类型过滤
+            model_type: 模型类型过滤（chat/image/video/audio）
 
         Returns:
             模型信息列表
         """
-        models = [
-            # 文本对话模型
-            ModelInfo(
-                id="gpt-4o",
-                name="GPT-4o",
-                type="chat",
-                provider="azure",
-                capabilities=["chat"],
-                max_tokens=128000,
-                supports_streaming=True,
-            ),
-            ModelInfo(
-                id="gpt-4",
-                name="GPT-4",
-                type="chat",
-                provider="azure",
-                capabilities=["chat"],
-                max_tokens=8192,
-                supports_streaming=True,
-            ),
-            ModelInfo(
-                id="gpt-35-turbo",
-                name="GPT-3.5 Turbo",
-                type="chat",
-                provider="azure",
-                capabilities=["chat"],
-                max_tokens=16384,
-                supports_streaming=True,
-            ),
-            # 图像生成模型
-            ModelInfo(
-                id="dall-e-3",
-                name="DALL-E 3",
-                type="image",
-                provider="azure",
-                capabilities=["text2image", "image2image"],
-            ),
-            # 语音转文字模型
-            ModelInfo(
-                id="whisper",
-                name="Azure Whisper",
-                type="audio",
-                provider="azure",
-                capabilities=["audio_transcribe", "audio_translate"],
-            ),
-            # 文字转语音模型
-            ModelInfo(
-                id="tts",
-                name="Azure TTS",
-                type="audio",
-                provider="azure",
-                capabilities=["audio_speech"],
-            ),
-            ModelInfo(
-                id="tts-hd",
-                name="Azure TTS HD",
-                type="audio",
-                provider="azure",
-                capabilities=["audio_speech"],
-            ),
+        client = self._get_client()
+        # Azure 部署列表 API 需带 api-version 查询参数
+        params = {"api-version": self.api_version}
+        response = await client.get(url="/openai/deployments", params=params)
+        data = response.json()
+        # Azure 部署列表：id 是部署名，model 是底层模型名
+        models_data = [
+            {
+                "id": item.get("model", item.get("id", "")),
+                "name": item.get("id"),
+            }
+            for item in data.get("data", [])
         ]
-
-        if model_type:
-            models = [m for m in models if m.type == model_type]
-
-        return models
+        return self._parse_models_response(
+            data={"data": models_data},
+            provider="azure",
+            model_type=model_type,
+        )
 
     # ==================== 辅助方法 ====================
 

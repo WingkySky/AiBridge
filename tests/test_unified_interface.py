@@ -21,7 +21,6 @@ from agn import (
     VideoDuration,
     VideoOptions,
 )
-from agn.adapters.base import BaseAdapter
 from agn.adapters.openai import OpenAIAdapter
 from agn.models.chat import ChatMessage
 from agn.models.common import ProviderConfig

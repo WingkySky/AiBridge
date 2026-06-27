@@ -209,106 +209,24 @@ class SiliconFlowAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # 智谱 GLM 系列
-            ModelInfo(
-                id="Pro/zai-org/GLM-4.7",
-                name="GLM-4.7 Pro",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat", "vision"],
-                description="智谱 GLM-4.7 旗舰模型",
-            ),
-            ModelInfo(
-                id="Pro/zai-org/GLM-5",
-                name="GLM-5 Pro",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat", "vision"],
-                description="智谱 GLM-5 最新旗舰",
-            ),
-            # DeepSeek 系列
-            ModelInfo(
-                id="deepseek-ai/DeepSeek-V3.2",
-                name="DeepSeek V3.2",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat"],
-                description="DeepSeek V3.2 模型",
-            ),
-            ModelInfo(
-                id="Pro/deepseek-ai/DeepSeek-V3.2",
-                name="DeepSeek V3.2 Pro",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat"],
-                description="DeepSeek V3.2 Pro 版本",
-            ),
-            # Qwen 系列
-            ModelInfo(
-                id="Qwen/Qwen3-8B",
-                name="Qwen 3 8B",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat"],
-                description="Qwen 3 8B 模型",
-            ),
-            ModelInfo(
-                id="Qwen/Qwen3-14B",
-                name="Qwen 3 14B",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat"],
-                description="Qwen 3 14B 模型",
-            ),
-            ModelInfo(
-                id="Qwen/Qwen3-32B",
-                name="Qwen 3 32B",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat"],
-                description="Qwen 3 32B 模型",
-            ),
-            ModelInfo(
-                id="Qwen/Qwen3.5-397B-A17B",
-                name="Qwen 3.5 397B",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat"],
-                description="Qwen 3.5 超大模型",
-            ),
-            # 混元系列
-            ModelInfo(
-                id="tencent/Hunyuan-A13B-Instruct",
-                name="Hunyuan A13B",
-                type="chat",
-                provider="siliconflow",
-                capabilities=["chat"],
-                description="腾讯混元 A13B 指令模型",
-            ),
-            # 语音转文字模型
-            ModelInfo(
-                id="FunAudioLLM/SenseVoiceSmall",
-                name="SenseVoice Small",
-                type="audio",
-                provider="siliconflow",
-                capabilities=["audio_transcribe"],
-                description="阿里通义 SenseVoice 多语言语音识别",
-            ),
-            ModelInfo(
-                id="iic/SenseVoiceSmall",
-                name="SenseVoice Small (iic)",
-                type="audio",
-                provider="siliconflow",
-                capabilities=["audio_transcribe"],
-                description="阿里通义 SenseVoice 语音识别",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取，不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="siliconflow",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -556,114 +474,24 @@ class TogetherAIAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Llama 系列
-            ModelInfo(
-                id="meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-                name="Llama 4 Maverick",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Meta Llama 4 Maverick 128E",
-            ),
-            ModelInfo(
-                id="meta-llama/Llama-4-Scout-17B-16E-Instruct-FP8",
-                name="Llama 4 Scout",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Meta Llama 4 Scout 16E",
-            ),
-            ModelInfo(
-                id="meta-llama/Llama-3-8b-chat-hf",
-                name="Llama 3 8B",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Meta Llama 3 8B",
-            ),
-            ModelInfo(
-                id="meta-llama/Llama-3-70b-chat-hf",
-                name="Llama 3 70B",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Meta Llama 3 70B",
-            ),
-            ModelInfo(
-                id="meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo",
-                name="Llama 3.1 405B",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Meta Llama 3.1 405B",
-            ),
-            # Qwen 系列
-            ModelInfo(
-                id="Qwen/Qwen2.5-72B-Instruct-Turbo",
-                name="Qwen 2.5 72B",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Qwen 2.5 72B 指令模型",
-            ),
-            ModelInfo(
-                id="Qwen/Qwen2.5-7B-Instruct-Turbo",
-                name="Qwen 2.5 7B",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Qwen 2.5 7B 指令模型",
-            ),
-            # DeepSeek 系列
-            ModelInfo(
-                id="deepseek-ai/DeepSeek-V3",
-                name="DeepSeek V3",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="DeepSeek V3 模型",
-            ),
-            ModelInfo(
-                id="deepseek-ai/DeepSeek-Coder-V2-Instruct",
-                name="DeepSeek Coder V2",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="DeepSeek Coder V2 指令模型",
-            ),
-            # Mistral 系列
-            ModelInfo(
-                id="mistralai/Mixtral-8x22B-Instruct-v0.1",
-                name="Mixtral 8x22B",
-                type="chat",
-                provider="togetherai",
-                capabilities=["chat"],
-                description="Mistral Mixtral 8x22B",
-            ),
-            # 语音转文字模型（Whisper）
-            ModelInfo(
-                id="openai/whisper-large-v3",
-                name="Whisper Large v3",
-                type="audio",
-                provider="togetherai",
-                capabilities=["audio_transcribe"],
-                description="OpenAI Whisper Large v3 语音识别",
-            ),
-            ModelInfo(
-                id="openai/whisper-large-v3-turbo",
-                name="Whisper Large v3 Turbo",
-                type="audio",
-                provider="togetherai",
-                capabilities=["audio_transcribe"],
-                description="OpenAI Whisper Large v3 Turbo 快速语音识别",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取，不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="togetherai",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -912,98 +740,24 @@ class FireworksAIAdapter(OpenAICompatibleAudioMixin, BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Llama 系列
-            ModelInfo(
-                id="accounts/fireworks/models/llama-v3p1-405b-instruct",
-                name="Llama 3.1 405B",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="Llama 3.1 405B Instruct",
-            ),
-            ModelInfo(
-                id="accounts/fireworks/models/llama-v3p1-70b-instruct",
-                name="Llama 3.1 70B",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="Llama 3.1 70B Instruct",
-            ),
-            ModelInfo(
-                id="accounts/fireworks/models/llama-v3p1-8b-instruct",
-                name="Llama 3.1 8B",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="Llama 3.1 8B Instruct",
-            ),
-            # Mixtral 系列
-            ModelInfo(
-                id="accounts/fireworks/models/mixtral-8x22b-instruct",
-                name="Mixtral 8x22B",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="Mixtral 8x22B Instruct",
-            ),
-            ModelInfo(
-                id="accounts/fireworks/models/mixtral-8x7b-instruct",
-                name="Mixtral 8x7B",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="Mixtral 8x7B Instruct",
-            ),
-            # DeepSeek 系列
-            ModelInfo(
-                id="accounts/fireworks/models/deepseek-v3",
-                name="DeepSeek V3",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="DeepSeek V3 模型",
-            ),
-            ModelInfo(
-                id="accounts/fireworks/models/deepseek-r1",
-                name="DeepSeek R1",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="DeepSeek R1 推理模型",
-            ),
-            # Qwen 系列
-            ModelInfo(
-                id="accounts/fireworks/models/qwen2p5-72b-instruct",
-                name="Qwen 2.5 72B",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="Qwen 2.5 72B Instruct",
-            ),
-            ModelInfo(
-                id="accounts/fireworks/models/qwen2p5-7b-instruct",
-                name="Qwen 2.5 7B",
-                type="chat",
-                provider="fireworksai",
-                capabilities=["chat"],
-                description="Qwen 2.5 7B Instruct",
-            ),
-            # 语音转文字模型（Whisper）
-            ModelInfo(
-                id="accounts/fireworks/models/whisper-v3",
-                name="Whisper v3",
-                type="audio",
-                provider="fireworksai",
-                capabilities=["audio_transcribe"],
-                description="OpenAI Whisper v3 语音识别",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models 实时拉取，不再使用硬编码示例。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models")
+        return self._parse_models_response(
+            data=response.json(),
+            provider="fireworksai",
+            model_type=model_type,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:
@@ -1257,90 +1011,36 @@ class CloudflareAIAdapter(BaseAdapter):
         self,
         model_type: str | None = None,
     ) -> list[ModelInfo]:
-        models = [
-            # Llama 系列
-            ModelInfo(
-                id="@cf/meta/llama-3.1-8b-instruct",
-                name="Llama 3.1 8B",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Meta Llama 3.1 8B Instruct",
-            ),
-            ModelInfo(
-                id="@cf/meta/llama-3.1-70b-instruct",
-                name="Llama 3.1 70B",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Meta Llama 3.1 70B Instruct",
-            ),
-            ModelInfo(
-                id="@cf/meta/llama-3-8b-instruct-lora",
-                name="Llama 3 8B LoRA",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Meta Llama 3 8B LoRA",
-            ),
-            # Mistral 系列
-            ModelInfo(
-                id="@cf/mistral/mistral-7b-instruct-v0.2",
-                name="Mistral 7B v0.2",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Mistral 7B Instruct v0.2",
-            ),
-            # DeepSeek
-            ModelInfo(
-                id="@cf/deepseek-ai/DeepSeek-V3-base",
-                name="DeepSeek V3 Base",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="DeepSeek V3 Base 模型",
-            ),
-            # Qwen 系列
-            ModelInfo(
-                id="@cf/qwen/qwen2.5-7b-instruct",
-                name="Qwen 2.5 7B",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Qwen 2.5 7B Instruct",
-            ),
-            ModelInfo(
-                id="@cf/qwen/qwen2.5-72b-instruct",
-                name="Qwen 2.5 72B",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Qwen 2.5 72B Instruct",
-            ),
-            # Gemma 系列
-            ModelInfo(
-                id="@cf/google/gemma-2-2b-it",
-                name="Gemma 2 2B IT",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Google Gemma 2 2B Instruct",
-            ),
-            ModelInfo(
-                id="@cf/google/gemma-2-7b-it",
-                name="Gemma 2 7B IT",
-                type="chat",
-                provider="cloudflareai",
-                capabilities=["chat"],
-                description="Google Gemma 2 7B Instruct",
-            ),
-        ]
+        """
+        获取可用模型列表
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        调用 GET /models/search 实时拉取，不再使用硬编码示例。
+        Cloudflare 端点需要 account_id（在 start() 中已校验并拼入 base_url），
+        响应结构与 OpenAI 兼容端点不同：{"result": {"models": [...]}}。
 
-        return models
+        Args:
+            model_type: 模型类型过滤（chat/image/video）
+
+        Returns:
+            模型信息列表
+        """
+        client = self._get_client()
+        response = await client.get(url="/models/search")
+        data = response.json()
+        # Cloudflare 响应: {"result": {"models": [...]}}，兼容 result 为 list 的情况
+        result = data.get("result", {})
+        if isinstance(result, dict):
+            items_data = result
+            items_key = "models"
+        else:
+            items_data = {"data": result}
+            items_key = "data"
+        return self._parse_models_response(
+            data=items_data,
+            provider="cloudflareai",
+            model_type=model_type,
+            items_key=items_key,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code < 400:

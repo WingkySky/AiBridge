@@ -7,14 +7,14 @@ AGN-SDK 新兴主流模型适配器测试
 - Meta Llama: Meta 官方 Llama API（聊天/多模态/流式）
 """
 
-import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from agn.adapters.emerging_models import (
     IdeogramAdapter,
-    LumaAdapter,
     LlamaAdapter,
+    LumaAdapter,
 )
 from agn.models.common import ProviderConfig
 
@@ -631,26 +631,86 @@ class TestLlamaAdapter:
 
     @pytest.mark.asyncio
     async def test_list_all_models(self, adapter: LlamaAdapter) -> None:
-        """测试获取所有模型"""
-        models = await adapter.list_models()
-        assert len(models) >= 7
-        model_ids = {m.id for m in models}
-        assert "llama-4-maverick" in model_ids
-        assert "llama-4-scout" in model_ids
-        assert "llama-3.3-70b-instruct" in model_ids
-        assert "llama-3.1-405b-instruct" in model_ids
-        assert "llama-3.1-70b-instruct" in model_ids
-        assert "llama-3.1-8b-instruct" in model_ids
-        for m in models:
-            assert m.type == "chat"
+        """测试获取所有模型（实时拉取 /models 端点）"""
+        await adapter.start()
+        try:
+            mock_result = {
+                "data": [
+                    {"id": "llama-4-maverick", "name": "Llama 4 Maverick"},
+                    {"id": "llama-4-scout", "name": "Llama 4 Scout"},
+                    {"id": "llama-3.3-70b-instruct", "name": "Llama 3.3 70B"},
+                    {"id": "llama-3.1-405b-instruct", "name": "Llama 3.1 405B"},
+                    {"id": "llama-3.1-70b-instruct", "name": "Llama 3.1 70B"},
+                    {"id": "llama-3.1-8b-instruct", "name": "Llama 3.1 8B"},
+                    {"id": "llama-guard-4", "name": "Llama Guard 4"},
+                ]
+            }
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json = MagicMock(return_value=mock_result)
+
+            with patch.object(
+                adapter._http_client, "get", new_callable=AsyncMock
+            ) as mock_get:
+                mock_get.return_value = mock_resp
+                models = await adapter.list_models()
+
+                mock_get.assert_called_once_with(url="/models")
+                assert len(models) == 7
+                model_ids = {m.id for m in models}
+                assert "llama-4-maverick" in model_ids
+                assert "llama-4-scout" in model_ids
+                assert "llama-3.3-70b-instruct" in model_ids
+                assert "llama-3.1-405b-instruct" in model_ids
+                assert "llama-3.1-70b-instruct" in model_ids
+                assert "llama-3.1-8b-instruct" in model_ids
+                for m in models:
+                    assert m.provider == "llama"
+        finally:
+            await adapter.close()
 
     @pytest.mark.asyncio
     async def test_list_chat_models_filter(self, adapter: LlamaAdapter) -> None:
-        """测试按类型过滤模型"""
-        chat_models = await adapter.list_models(model_type="chat")
-        assert len(chat_models) >= 7
-        image_models = await adapter.list_models(model_type="image")
-        assert len(image_models) == 0
+        """测试按类型过滤模型（chat 类型，过滤掉 image/video）"""
+        await adapter.start()
+        try:
+            # 混合类型响应：含 chat、image、video 模型
+            mock_result = {
+                "data": [
+                    {"id": "llama-4-maverick", "name": "Llama 4 Maverick"},
+                    {"id": "llama-3.3-70b-instruct", "name": "Llama 3.3 70B"},
+                    {"id": "flux-pro", "name": "Flux Pro"},
+                    {"id": "agnes-video-1", "name": "Agnes Video 1"},
+                ]
+            }
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.json = MagicMock(return_value=mock_result)
+
+            with patch.object(
+                adapter._http_client, "get", new_callable=AsyncMock
+            ) as mock_get:
+                mock_get.return_value = mock_resp
+
+                # 全量列表应包含多种类型
+                all_models = await adapter.list_models()
+                types = {m.type for m in all_models}
+                assert "chat" in types
+                assert "image" in types
+                assert "video" in types
+
+                # 按 chat 过滤只返回 chat 类型
+                chat_models = await adapter.list_models(model_type="chat")
+                assert len(chat_models) >= 1
+                for m in chat_models:
+                    assert m.type == "chat"
+
+                # 按 image 过滤返回空（Llama 无原生 image 模型时）
+                image_models = await adapter.list_models(model_type="image")
+                # mock 中 flux-pro 会被推断为 image 类型
+                assert all(m.type == "image" for m in image_models)
+        finally:
+            await adapter.close()
 
 
 class TestLlamaChat:
@@ -953,8 +1013,8 @@ class TestRouterEmergingModelsMapping:
         """测试适配器工厂注册"""
         from agn.adapters import (
             IdeogramAdapter,
-            LumaAdapter,
             LlamaAdapter,
+            LumaAdapter,
         )
         from agn.adapters.factory import AdapterFactory
 

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-27
+
+### Fixed
+
+- AgnesAdapter 视频创建端点：`/videos/generations` → `/videos`，对齐 Agnes Video V2.0 官方协议
+- AgnesAdapter 视频轮询端点：优先使用 `poll_url`（Agnes 特有的 /agnesapi 轮询通道）+ `/videos/{task_id}` 双路径回退；4xx 直接抛出、网络错误回退
+- AgnesAdapter 视频轮询连接池 Bug：原实现 `client = self._get_client()` 后立即被新 `AsyncHttpClient` 覆盖，且每次轮询都新建/关闭客户端，违背连接池复用原则。现统一复用 `self._http_client`
+- AgnesAdapter `list_models` 硬编码 9 个假模型 ID（如 `video-gen-1`、`dall-e-3` 等）改为实时调用 `GET /models` 拉取
+
+### Added
+
+- `VideoGenerationOptions` 新增 `duration` / `aspect_ratio` / `resolution` 三个通用字段，便于火山引擎 Seedance、Agnes 等以时长/宽高比/分辨率档位为参数的模型通过统一 `options` 调用
+- `BaseAdapter._infer_type(model_id)` 静态方法：根据模型 ID 推断 chat / image / video / audio 类型
+- `BaseAdapter._parse_models_response(data, provider, model_type, items_key)` 静态方法：统一解析 OpenAI 兼容的 `{"data":[{"id":...}]}` 响应为 `ModelInfo` 列表，兼容 `display_name` 字段
+- 全量改造硬编码模型列表为实时拉取：OpenAI / Anthropic / Gemini / Azure / Stability / Qwen / Zhipu / Doubao / Kimi / DeepSeek / StepFun / Mistral / Cohere / Perplexity / Grok / Yi / SenseNova / Hunyuan / Groq / SiliconFlow / TogetherAI / FireworksAI / CloudflareAI / Llama / ElevenLabs / Cartesia 共 26 个适配器
+
+### Changed
+
+- 无标准 `/models` 端点的 Provider（Runway / Pika / Kling / Volcengine CV / Ideogram / Luma / Ernie / MiniMax / Deepgram / AssemblyAI / EdgeTTS）保留硬编码列表，并在源码加 `# NOTE` 注释说明原因
+
 ## [1.2.0] - 2026-06-26
 
 ### Added

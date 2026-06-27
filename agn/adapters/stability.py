@@ -372,43 +372,33 @@ class StabilityAdapter(BaseAdapter):
         """
         获取可用模型列表
 
+        调用 GET /v1/engines/list 实时拉取，不再使用硬编码示例。
+
         Args:
             model_type: 模型类型过滤
 
         Returns:
             模型信息列表
         """
-        models = [
-            ModelInfo(
-                id="stable-diffusion-xl-1024-v1-1",
-                name="SDXL 1.1",
-                type="image",
-                provider="stability",
-                capabilities=["text2image", "image2image"],
-                description="Stable Diffusion XL 1024px",
-            ),
-            ModelInfo(
-                id="stable-diffusion-3-medium",
-                name="SD3 Medium",
-                type="image",
-                provider="stability",
-                capabilities=["text2image"],
-                description="Stable Diffusion 3 Medium",
-            ),
-            ModelInfo(
-                id="stable-diffusion-3-fast",
-                name="SD3 Fast",
-                type="image",
-                provider="stability",
-                capabilities=["text2image"],
-                description="Stable Diffusion 3 Fast",
-            ),
-        ]
+        client = self._get_client()
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        logger.debug("Fetching engines list from Stability AI")
 
-        return models
+        response = await client.get("/v1/engines/list")
+        self._handle_stability_error(response)
+
+        # Stability 返回顶层数组，包装成 {"data": [...]} 交给基类统一解析
+        engines = response.json()
+        if isinstance(engines, list):
+            data: dict[str, Any] = {"data": engines}
+        else:
+            data = engines
+
+        return self._parse_models_response(
+            data=data,
+            provider="stability",
+            model_type=model_type,
+        )
 
     # ==================== 辅助方法 ====================
 

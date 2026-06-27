@@ -450,51 +450,47 @@ class GeminiAdapter(BaseAdapter):
         """
         获取可用模型列表
 
+        调用 GET /models 实时拉取，不再使用硬编码示例。
+        Gemini 的 listModels 端点响应结构特殊：
+        - 模型列表在 "models" 键下（非 OpenAI 的 "data"）
+        - 模型 ID 在 "name" 字段且带 "models/" 前缀（如 "models/gemini-1.5-pro"）
+        - 显示名在 "displayName" 字段
+        因此需要预处理为 OpenAI 兼容的 {"data":[{"id":...,"name":...}]} 结构
+        再交给基类 _parse_models_response 统一解析。
+
         Args:
-            model_type: 模型类型过滤
+            model_type: 模型类型过滤（chat/image/video/audio）
 
         Returns:
             模型信息列表
         """
-        models = [
-            ModelInfo(
-                id="gemini-2.5-pro",
-                name="Gemini 2.5 Pro",
-                type="chat",
-                provider="gemini",
-                capabilities=["chat", "vision"],
-                description="Gemini 2.5 Pro - 最新最强模型",
-            ),
-            ModelInfo(
-                id="gemini-2.5-flash",
-                name="Gemini 2.5 Flash",
-                type="chat",
-                provider="gemini",
-                capabilities=["chat", "vision"],
-                description="Gemini 2.5 Flash - 快速高效模型",
-            ),
-            ModelInfo(
-                id="gemini-1.5-pro",
-                name="Gemini 1.5 Pro",
-                type="chat",
-                provider="gemini",
-                capabilities=["chat", "vision"],
-                description="Gemini 1.5 Pro",
-            ),
-            ModelInfo(
-                id="gemini-1.5-flash",
-                name="Gemini 1.5 Flash",
-                type="chat",
-                provider="gemini",
-                capabilities=["chat", "vision"],
-                description="Gemini 1.5 Flash",
-            ),
-        ]
+        client = self._get_client()
+        response = await client.get(url="/models")
+        data = response.json()
 
-        if model_type:
-            models = [m for m in models if m.type == model_type]
+        # Gemini 响应特殊：模型列表在 "models" 键下，id 在 "name" 字段且带 "models/" 前缀
+        # 预处理：去掉 "models/" 前缀作为 id，displayName 作为 name
+        models_data: list[dict[str, Any]] = []
+        for item in data.get("models", []):
+            name = item.get("name", "")
+            # 去掉 "models/" 前缀作为模型 ID
+            model_id = (
+                name.removeprefix("models/") if name.startswith("models/") else name
+            )
+            if not model_id:
+                continue
+            models_data.append(
+                {
+                    "id": model_id,
+                    "name": item.get("displayName", model_id),
+                }
+            )
 
-        return models
+        return self._parse_models_response(
+            data={"data": models_data},
+            provider="gemini",
+            model_type=model_type,
+        )
 
     # ==================== 响应解析 ====================
 
