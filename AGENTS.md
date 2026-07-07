@@ -2,6 +2,10 @@
 
 > 本文件是 Agent 执行任务时必须首先加载和理解的项目指南，包含项目目标、架构、规范、验收标准等关键信息。
 
+> ⚠️ **Rust 重构进行中**：本项目正在用 Rust 重构为跨语言 SDK `aibridge`（分支 `feat/aibridge-rust-rewrite`）。
+> 接手 Rust 重构工作请先读 **[docs/PROGRESS.md](docs/PROGRESS.md)**（完整进度 + 接手指南）+ [设计文档](docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md) + [实现计划](docs/superpowers/plans/2026-07-07-aibridge-implementation-plan.md)。
+> 本文档（AGENTS.md）描述的是 Python 旧版（agn-sdk v1），Rust 新版以 PROGRESS.md + 设计文档为准。
+
 ---
 
 ## 1. 项目概述
