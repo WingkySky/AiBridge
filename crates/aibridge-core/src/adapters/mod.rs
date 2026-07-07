@@ -27,3 +27,9 @@ pub mod openai;
 
 /// 火山引擎 CV 适配器：阶段 1 MVP，火山引擎视觉/视频生成协议
 pub mod volcengine_cv;
+
+/// Azure OpenAI 适配器：阶段 2a，OpenAI 兼容协议的子适配器（Azure 部署）
+pub mod azure;
+
+/// 聚合平台适配器：阶段 2a，含 SiliconFlow/TogetherAI/FireworksAI/CloudflareAI 四个 OpenAI 兼容子适配器
+pub mod aggregation_platforms;

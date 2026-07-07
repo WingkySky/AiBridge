@@ -2090,7 +2090,7 @@ mod tests {
         );
         assert_eq!(result.get("topP").and_then(|v| v.as_f64()), Some(0.9));
         assert_eq!(result.get("topK").and_then(|v| v.as_i64()), Some(40));
-        assert!(result.get("stopSequences").is_some());
+        assert!(result.contains_key("stopSequences"));
         // temperature 不在 rename_map，原名透传
         assert_eq!(
             result.get("temperature").and_then(|v| v.as_f64()),

@@ -8,7 +8,11 @@
 //! - 阶段 0.4 暂只占位分支（返 ProviderNotFound），具体适配器阶段 1 起填充
 
 use crate::adapter::Adapter;
+use crate::adapters::aggregation_platforms::{
+    CloudflareAIAdapter, FireworksAIAdapter, SiliconFlowAdapter, TogetherAIAdapter,
+};
 use crate::adapters::agnes::AgnesAdapter;
+use crate::adapters::azure::AzureAdapter;
 use crate::adapters::echo::EchoAdapter;
 use crate::adapters::gemini::GeminiAdapter;
 use crate::adapters::openai::OpenAiAdapter;
@@ -26,15 +30,19 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "agnes",
     "volcengine_cv",
     "gemini",
-    // 阶段 2 起补充：
+    // 阶段 2a 已实现（兼容族）：
     "azure",
+    "siliconflow",
+    "togetherai",
+    "fireworksai",
+    "cloudflareai",
+    // 阶段 2b/2c 待实现：
     "anthropic",
     "runway",
     "pika",
     "kling",
     "stability",
     "chinese",
-    "aggregation_platforms",
     "edge-tts",
     "elevenlabs",
     "cartesia",
@@ -57,22 +65,22 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         "agnes" => Ok(Box::new(AgnesAdapter::new(config)?)),
         "volcengine_cv" => Ok(Box::new(VolcengineCvAdapter::new(config)?)),
         "gemini" => Ok(Box::new(GeminiAdapter::new(config)?)),
+        // 阶段 2a 适配器：OpenAI 兼容族
+        "azure" => Ok(Box::new(AzureAdapter::new(config)?)),
+        // 聚合平台：别名对齐 Python agn/adapters/aggregation_platforms.py 末尾 register 调用
+        "siliconflow" | "sf" => Ok(Box::new(SiliconFlowAdapter::new(config)?)),
+        "togetherai" | "together" => Ok(Box::new(TogetherAIAdapter::new(config)?)),
+        "fireworksai" | "fireworks" => Ok(Box::new(FireworksAIAdapter::new(config)?)),
+        "cloudflareai" | "cloudflare" | "workersai" => {
+            Ok(Box::new(CloudflareAIAdapter::new(config)?))
+        }
         // 阶段 2 适配器占位
-        "azure"
-        | "anthropic"
-        | "runway"
-        | "pika"
-        | "kling"
-        | "stability"
-        | "chinese"
-        | "aggregation_platforms"
-        | "edge-tts"
-        | "elevenlabs"
-        | "cartesia"
-        | "deepgram"
-        | "assemblyai" => Err(AibridgeError::ProviderNotFound {
-            provider: format!("{provider}（阶段 2 待实现）"),
-        }),
+        "anthropic" | "runway" | "pika" | "kling" | "stability" | "chinese" | "edge-tts"
+        | "elevenlabs" | "cartesia" | "deepgram" | "assemblyai" => {
+            Err(AibridgeError::ProviderNotFound {
+                provider: format!("{provider}（阶段 2 待实现）"),
+            })
+        }
         // 未知 provider
         _ => Err(AibridgeError::provider_not_found(format!(
             "{provider}（未知 provider，支持：{}）",
@@ -131,6 +139,78 @@ mod tests {
     }
 
     #[test]
+    fn create_azure_returns_adapter() {
+        // 阶段 2a：工厂已能构造真实 AzureAdapter（仅校验构造成功，不触发 HTTP）
+        // Azure 构造需 base_url 或 resource_name + deployment_id，此处用 base_url
+        let opts = ClientOptions::builder()
+            .api_key("k")
+            .base_url("https://example.openai.azure.com/openai/deployments/gpt-4")
+            .build();
+        let config = ProviderConfig::from_options("azure", opts);
+        let adapter = create_adapter(config).expect("工厂应能创建 azure 适配器");
+        assert_eq!(adapter.provider_type(), "azure");
+    }
+
+    #[test]
+    fn create_siliconflow_returns_adapter() {
+        let adapter =
+            create_adapter(config_for("siliconflow")).expect("工厂应能创建 siliconflow 适配器");
+        assert_eq!(adapter.provider_type(), "siliconflow");
+    }
+
+    #[test]
+    fn create_togetherai_returns_adapter() {
+        let adapter =
+            create_adapter(config_for("togetherai")).expect("工厂应能创建 togetherai 适配器");
+        assert_eq!(adapter.provider_type(), "togetherai");
+    }
+
+    #[test]
+    fn create_fireworksai_returns_adapter() {
+        let adapter =
+            create_adapter(config_for("fireworksai")).expect("工厂应能创建 fireworksai 适配器");
+        assert_eq!(adapter.provider_type(), "fireworksai");
+    }
+
+    #[test]
+    fn create_cloudflareai_returns_adapter() {
+        // Cloudflare 需 extra.account_id 才能通过构造校验
+        let opts = ClientOptions::builder()
+            .api_key("k")
+            .extra("account_id", "test-account")
+            .build();
+        let config = ProviderConfig::from_options("cloudflareai", opts);
+        let adapter = create_adapter(config).expect("工厂应能创建 cloudflareai 适配器");
+        assert_eq!(adapter.provider_type(), "cloudflareai");
+    }
+
+    #[test]
+    fn create_aggregation_platform_aliases_map_to_main_provider_type() {
+        // 别名对齐 Python agn/adapters/aggregation_platforms.py 末尾 register 调用：
+        // sf -> siliconflow / together -> togetherai / fireworks -> fireworksai
+        // cloudflare & workersai -> cloudflareai
+        let sf = create_adapter(config_for("sf")).expect("别名 sf 应映射到 siliconflow");
+        assert_eq!(sf.provider_type(), "siliconflow");
+        let together =
+            create_adapter(config_for("together")).expect("别名 together 应映射到 togetherai");
+        assert_eq!(together.provider_type(), "togetherai");
+        let fireworks =
+            create_adapter(config_for("fireworks")).expect("别名 fireworks 应映射到 fireworksai");
+        assert_eq!(fireworks.provider_type(), "fireworksai");
+
+        let opts = ClientOptions::builder()
+            .api_key("k")
+            .extra("account_id", "test-account")
+            .build();
+        let cloudflare = create_adapter(ProviderConfig::from_options("cloudflare", opts.clone()))
+            .expect("别名 cloudflare 应映射到 cloudflareai");
+        assert_eq!(cloudflare.provider_type(), "cloudflareai");
+        let workersai = create_adapter(ProviderConfig::from_options("workersai", opts))
+            .expect("别名 workersai 应映射到 cloudflareai");
+        assert_eq!(workersai.provider_type(), "cloudflareai");
+    }
+
+    #[test]
     fn create_phase2_adapter_returns_phase2_message() {
         let result = create_adapter(config_for("anthropic"));
         if let Err(AibridgeError::ProviderNotFound { provider }) = result {
@@ -146,6 +226,10 @@ mod tests {
         assert!(is_known_provider("openai"));
         assert!(is_known_provider("edge-tts"));
         assert!(is_known_provider("assemblyai"));
+        // 阶段 2a 已实现 provider 应被识别
+        assert!(is_known_provider("azure"));
+        assert!(is_known_provider("siliconflow"));
+        assert!(is_known_provider("cloudflareai"));
     }
 
     #[test]
