@@ -1,7 +1,7 @@
 # AIBridge Rust 重构 · 进度与接手文档
 
 > 本文档供任何 agent 接手 AIBridge Rust 重构工作使用。自包含，不依赖 Claude memory。
-> 最后更新：2026-07-07
+> 最后更新：2026-07-08
 
 ---
 
@@ -19,6 +19,8 @@
 |---|---|---|
 | 设计文档 | [docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md](superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md) | 架构、数据模型、FFI 边界、异步桥接、错误处理、适配器迁移策略 |
 | 实现计划 | [docs/superpowers/plans/2026-07-07-aibridge-implementation-plan.md](superpowers/plans/2026-07-07-aibridge-implementation-plan.md) | 阶段 0-3 任务分解、多 agent 编排策略、里程碑 |
+| 迁移指南 | [docs/migration-guide.md](migration-guide.md) | Python v1（agn-sdk）→ v2（aibridge）破坏性升级对照与示例 |
+| v2 README | [README_aibridge.md](../README_aibridge.md) | 五语言快速开始 + provider 列表 |
 | 本进度文档 | docs/PROGRESS.md | 当前进度 + 接手指南（本文档） |
 
 ## 3. 架构概览
@@ -45,11 +47,11 @@ aibridge/
 │   ├── go/                 # CGO 调 ffi
 │   ├── jvm/                # JNA 调 ffi（Java）
 │   └── dotnet/             # P/Invoke 调 ffi（C#）
-├── docs/                   # 设计文档 + 计划 + 本进度文档
+├── docs/                   # 设计文档 + 计划 + 迁移指南 + 本进度文档
 └── examples/               # 五语言 hello world（echo adapter）
 ```
 
-## 4. 当前进度（截至 2026-07-07）
+## 4. 当前进度（截至 2026-07-08）
 
 ### ✅ 阶段 0：地基（完成）
 - Cargo workspace + 4 crate 骨架
@@ -67,7 +69,11 @@ aibridge/
 - 错误 code 统一（对齐 Rust error.rs 的 code() 值）
 - dylib 产物名冲突修复（aibridge-python lib 改 `_aibridge`）
 
-### ✅ 阶段 2a：OpenAI 兼容族 + 部分独立协议（完成，23 provider）
+### ✅ 阶段 2：全量适配器迁移（完成，38 真实 provider + echo mock）
+
+阶段 2 分三批搬完 v1 全部适配器，编译期 match 工厂已注册全部 provider。工厂占位分支已清空。
+
+#### 阶段 2a：OpenAI 兼容族（完成，24 provider）
 | 文件 | provider（含别名） |
 |---|---|
 | openai.rs | openai |
@@ -81,22 +87,47 @@ aibridge/
 | emerging_models.rs | ideogram\|ideo, luma\|dream-machine\|lumalabs, llama\|meta-llama\|meta |
 | chinese.rs | qwen, zhipu, doubao, ernie, kimi, minimax |
 
-### ⏳ 阶段 2b：独立协议 5 个（待做）
-anthropic / stability / runway / pika / kling
+#### 阶段 2b：独立协议 5 个（完成）
+| 文件 | provider | 能力 |
+|---|---|---|
+| anthropic.rs | anthropic | Claude messages API，流式 SSE，文本对话/多模态 |
+| stability.rs | stability | Stability AI 文生图/图生图 |
+| runway.rs | runway | 视频生成（文生视频/图生视频/任务轮询） |
+| pika.rs | pika | 视频生成（文生视频/图生视频/任务轮询） |
+| kling.rs | kling | 可灵视频生成（文生视频/图生视频/任务轮询） |
 
-### ⏳ 阶段 2c：音频 5 个（待做，二进制载荷）
-edge-tts / elevenlabs / cartesia / deepgram / assemblyai
+#### 阶段 2c：音频 5 个（完成，二进制载荷）
+| 文件 | provider | 能力 | 备注 |
+|---|---|---|---|
+| edge_tts.rs | edge-tts（别名 edge_tts / edge） | 免费 TTS | 免认证（`requires_api_key=false`） |
+| elevenlabs.rs | elevenlabs（别名 eleven / 11labs） | TTS | 高质量音色/多语种/克隆 |
+| cartesia.rs | cartesia（别名 sonic） | TTS | Sonic 低延迟流式 |
+| deepgram.rs | deepgram（别名 dg） | ASR | Token 鉴权 / REST |
+| assemblyai.rs | assemblyai（别名 assembly / aai） | ASR | Key 鉴权 / REST |
 
-### ⏳ 阶段 3：发布（待做）
-- CI 矩阵（平台 × 语言，交叉编译）
-- 五语言包发布（PyPI `aibridge` / npm `aibridge` / Maven `io.aibridge:aibridge` / NuGet `AIBridge` / Go module `aibridge-go`）
-- Python v1→v2 迁移指南
-- 文档网站
-- 旧版 v1 归档 + 打 v2.0.0 tag
+#### 已迁移 provider 完整列表（38 真实 + 1 mock）
+
+**MVP（4）**：openai、agnes、volcengine_cv、gemini
+**兼容族（24）**：azure、siliconflow、togetherai、fireworksai、cloudflareai、grok、yi、sensenova、hunyuan、groq、deepseek、stepfun、mistral、cohere、perplexity、ideogram、luma、llama、qwen、zhipu、doubao、ernie、kimi、minimax
+**独立协议（5）**：anthropic、stability、runway、pika、kling
+**音频（5）**：edge-tts、elevenlabs、cartesia、deepgram、assemblyai
+**Mock（1）**：echo（阶段 0.6 管线验证用，常驻）
+
+### ⏳ 阶段 3：发布收尾（进行中）
+- [x] Python v1→v2 迁移指南（[docs/migration-guide.md](migration-guide.md)）
+- [x] v2 README（[README_aibridge.md](../README_aibridge.md)）
+- [x] 进度文档更新（本文档）
+- [ ] CI 矩阵（平台 × 语言，交叉编译）
+- [ ] 五语言包发布（PyPI `aibridge` / npm `aibridge` / Maven `io.aibridge:aibridge` / NuGet `AIBridge` / Go module `aibridge-go`）
+- [ ] 文档网站
+- [ ] 旧版 v1 归档 + 打 v2.0.0 tag
+- [ ] .NET hello world 验证（待 dotnet sdk）
+- [ ] 一致性测试纳入 CI（当前手动跑）
+- [ ] 真实 API key 冒烟测试（用户验证）
 
 ## 5. 测试状态
 
-- **aibridge-core**：810 单测全通过
+- **aibridge-core**：1448 单测全通过（含 38 provider mock HTTP 测试 + 数据模型 + 错误 + 路由）
 - **aibridge-ffi**：39 单测全通过
 - **五语言 hello world**（echo adapter）：Python/Node/Go/JVM 跑通，.NET 代码就绪待 dotnet
 - **跨语言一致性测试**：tests/consistency/（四语言 chat/stream/speech/错误全一致）
@@ -107,6 +138,7 @@ edge-tts / elevenlabs / cartesia / deepgram / assemblyai
 2. **一致性测试纳入 CI**：当前手动跑，待接入 CI matrix
 3. **真实 IO 流式验证**：Python/Node 流式重构已完成（不阻塞推理），但真实 API key 验证待用户
 4. **dylib 分发**：Go/JVM/.NET 依赖 libaibridge，JVM/.NET 打进包，Go 提供安装脚本（阶段 3 处理）
+5. **Python 绑定能力暴露**：Rust 核心已全部实现 38 provider + 六大能力；Python 绑定（PyO3）目前暴露 `chat/chat_stream/speech`，`image_generate/video_*/embed/transcribe/list_models/list_voices` 待后续版本暴露（见迁移指南 Q1）
 
 ## 7. 新 agent 接手指南
 
@@ -121,36 +153,27 @@ edge-tts / elevenlabs / cartesia / deepgram / assemblyai
 ### 7.2 验证当前状态
 ```bash
 git checkout feat/aibridge-rust-rewrite
-cargo test -p aibridge-core        # 期望 810 passed
+cargo test -p aibridge-core        # 期望 1448 passed
 cargo test -p aibridge-ffi         # 期望 39 passed
 cargo build --workspace            # 0 warning
 ```
 
-### 7.3 怎么继续阶段 2b/2c
+### 7.3 怎么继续阶段 3
 
-**模式**：每批 2 个适配器，worktree 并行实现 + 收尾 agent cherry-pick 注册（同阶段 2a）。
+阶段 3 是发布收尾，主要工作：
 
-1. **启动 2 个 worktree agent**（每个实现一个 adapter .rs）：
-   - prompt 要点：读设计文档第 10 节 + Python 对应 `agn/adapters/<name>.py` + `openai_compat.rs`（地基）+ `volcengine_cv.rs`/`more_models.rs Cohere`（独立协议范例）；实现 adapter .rs；mockito 单测；**只 git add 自己的 .rs**（不 add mod.rs/factory.rs）；commit 返回 hash
-   - `isolation: "worktree"` + `run_in_background: true`
-   - worktree 初始可能在 main 分支（无 crates），需 `git checkout feat/aibridge-rust-rewrite` 或基于它建工作分支
-2. **收尾 agent**：cherry-pick 2 个 commit + 注册 mod.rs（pub mod）+ factory.rs（match 分支 + 别名，参考 Python `agn/adapters/factory.py` 的 register）+ 更新 factory 测试 + `cargo test` 全量 + commit
-3. **避免 4+ 并行**（会触发 API 限流 429），每批 2 个
+1. **CI 矩阵**：GitHub Actions 平台（linux/macos/windows × amd64/arm64）× 语言。aibridge-ffi 动态库作为构建 artifact 供 Go/JVM/.NET 打包消费。Rust 核心 + 5 绑定各一个 workflow。
+2. **五语言包发布**：
+   - Python：`maturin build --release` 产 wheel，发布到 PyPI `aibridge`
+   - Node：`napi build --release` 产 .node，发布到 npm `aibridge`
+   - Go：提供 libaibridge 安装脚本，Go module `aibridge-go`
+   - JVM：动态库打进 jar（按平台 classifier），Maven `io.aibridge:aibridge`
+   - .NET：动态库打进包（runtimes/{rid}/native/），NuGet `AIBridge`
+3. **Python 绑定补全**：在 `crates/aibridge-python/src/lib.rs` 的 `#[pymethods] impl Client` 补 `image_generate/video_create/video_poll/embed/transcribe/list_models/list_voices/recommend_voices`，参照已有 `chat`/`speech` 的模式（builder 构造 + RUNTIME.spawn + map_error）。
+4. **文档网站**：mkdocs 或 similar，整合设计文档 + 迁移指南 + 五语言 API。
+5. **v1 归档**：`main` 分支（Python v1）打 `v1.3.3` tag 后归档，README 指向 v2。
 
-### 7.4 阶段 2b 各适配器要点
-- **anthropic**：Claude messages API，`POST /messages`，header `x-api-key`+`anthropic-version`，流式 SSE 事件（content_block_delta），`ANTHROPIC_MAPPING`。Python: `agn/adapters/anthropic.py`
-- **stability**：Stability AI 图像协议，独立。Python: `agn/adapters/stability.py`
-- **runway**：视频协议，独立。Python: `agn/adapters/runway.py`
-- **pika**：视频协议，独立。Python: `agn/adapters/pika.py`
-- **kling**：可灵视频/图像，独立。Python: `agn/adapters/kling.py`
-
-### 7.5 阶段 2c 音频要点
-- 二进制载荷（TTS 返 audio_data bytes，ASR 接受 file path/URL/bytes/base64）
-- edge-tts 免认证（`requires_api_key=false`，加到 `client.rs` 的 `is_free_provider`）
-- TTS 音色健康检查/推荐/自动降级（v1.3.3 特性，保留）
-- Python: `agn/adapters/audio_adapters.py`（含全部 5 个）
-
-### 7.6 关键约束（必须遵守）
+### 7.4 关键约束（必须遵守）
 - **中文注释**（项目强制规则，文件模块文档字符串 + 公开项文档注释）
 - **错误 code 对齐** Rust `aibridge-core/src/error.rs` 的 `code()` 实际值（带 `_error` 后缀）
 - **mockito 1.x 用法**：`let mut server = mockito::Server::new_async().await;`（不是 `async_try_start`）
@@ -158,8 +181,9 @@ cargo build --workspace            # 0 warning
 - **Python/Node 流式**已重构（PyO3 Coroutine / napi async fn），不要再改回 block_on
 - **Adapter trait** 在 `crates/aibridge-core/src/adapter/base.rs`；工厂注册在 `adapter/factory.rs`（编译期 match，非运行时注册）
 - **openai_compat.rs** 的 9 个方法已 pub，子适配器组合委托复用
+- **环境变量双前缀兼容**：`AIBRIDGE_*` 新前缀 + `AGN_*` 老前缀并存（见 `config.rs merge_env`）
 
-### 7.7 关键命令
+### 7.5 关键命令
 ```bash
 # Rust 核心
 cargo test -p aibridge-core
@@ -181,14 +205,52 @@ cd bindings/go && CGO_ENABLED=1 DYLD_LIBRARY_PATH=../../target/debug go run ./ex
 
 # JVM 绑定
 cd bindings/jvm && ./gradlew run
+
+# .NET 绑定
+cargo build -p aibridge-ffi
+cd bindings/dotnet && dotnet run
 ```
 
-## 8. 提交历史（阶段 0-2a）
+## 8. 提交历史（阶段 0-3）
 
 ```
+（阶段 3）
+<待提交> docs: 阶段3 Python v1→v2 迁移指南 + README + 进度更新
+
+（阶段 2c 第三批，阶段 2 全部完成）
+12925ad feat(aibridge-core): 阶段2c 第三批收尾 注册 deepgram + assemblyai 到工厂（阶段2 全部完成）
+3fb46be feat(aibridge-core): 阶段2c assemblyai 适配器
+e533bff feat(aibridge-core): 阶段2c deepgram 适配器
+
+（阶段 2c 第二批，TTS）
+ac0a3c8 feat(aibridge-core): 阶段2c 第二批收尾 注册 elevenlabs + cartesia 到工厂
+5c2d659 feat(aibridge-core): 阶段2c cartesia 适配器
+0b7c205 feat(aibridge-core): 阶段2c elevenlabs 适配器
+
+（阶段 2b+2c 收尾，视频 + 免费 TTS）
+03776d2 feat(aibridge-core): 阶段2b+2c 收尾 注册 kling + edge-tts 到工厂（edge-tts 免认证）
+d6493c7 feat(aibridge-core): 阶段2c edge-tts 适配器（免费 TTS）
+ee89f32 feat(aibridge-core): 阶段2b kling 适配器（可灵）
+
+（阶段 2b 第二批，视频）
+3f05c39 feat(aibridge-core): 阶段2b 第二批收尾 注册 runway + pika 到工厂
+0124c5c feat(aibridge-core): 阶段2b pika 适配器
+0247589 feat(aibridge-core): 阶段2b runway 适配器
+
+（阶段 2b 第一批，独立协议）
+04fd202 feat(aibridge-core): 阶段2b 第一批收尾 注册 anthropic + stability 到工厂
+e6151da feat(aibridge-core): 阶段2b stability 适配器
+954d153 feat(aibridge-core): 阶段2b anthropic 适配器
+
+（阶段 2a 完成）
+37a1b9a docs: AIBridge Rust 重构进度文档 + AGENTS.md 接手指引
 3880168 feat(aibridge-core): 阶段2a 第三批收尾（emerging_models + chinese，阶段2a 完成）
+43e923f feat(aibridge-core): 阶段2a chinese 适配器（中文模型聚合）
+ba4a78b feat(aibridge-core): 阶段2a emerging_models 适配器
 a0eb96d feat(aibridge-core): 阶段2a 第二批收尾（additional_models + more_models）
 cb4536a feat(aibridge-core): 阶段2a 第一批收尾（azure + 聚合平台）
+
+（阶段 0-1）
 7b4a79d fix: 阶段1 Python/Node 流式桥接重构
 e5df4f3 fix(aibridge-python): dylib 产物名改为 _aibridge
 68954d2 feat: 阶段1.5 跨语言一致性测试 + 错误 code 统一
