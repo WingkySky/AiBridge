@@ -21,8 +21,10 @@ use crate::adapters::chinese::{
     DoubaoAdapter, ErnieAdapter, KimiAdapter, MiniMaxAdapter, QwenAdapter, ZhipuAdapter,
 };
 use crate::adapters::echo::EchoAdapter;
+use crate::adapters::edge_tts::EdgeTtsAdapter;
 use crate::adapters::emerging_models::{IdeogramAdapter, LlamaAdapter, LumaAdapter};
 use crate::adapters::gemini::GeminiAdapter;
+use crate::adapters::kling::KlingAdapter;
 use crate::adapters::more_models::{
     CohereAdapter, DeepSeekAdapter, MistralAdapter, PerplexityAdapter, StepFunAdapter,
 };
@@ -77,9 +79,11 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     // 阶段 2b 第二批独立协议（已实现）：
     "runway",
     "pika",
-    // 阶段 2b/2c 待实现：
+    // 阶段 2b 第三批独立协议（已实现）：
     "kling",
+    // 阶段 2c 音频（已实现）：
     "edge-tts",
+    // 阶段 2c 待实现：
     "elevenlabs",
     "cartesia",
     "deepgram",
@@ -140,10 +144,15 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         // 阶段 2b 第二批独立协议：别名对齐 Python agn/adapters/{runway,pika}.py 末尾 register 调用（均无别名）
         "runway" => Ok(Box::new(RunwayAdapter::new(config)?)),
         "pika" => Ok(Box::new(PikaAdapter::new(config)?)),
-        // 阶段 2 适配器占位
-        "kling" | "edge-tts" | "elevenlabs" | "cartesia" | "deepgram" | "assemblyai" => {
+        // 阶段 2b 第三批独立协议：别名对齐 Python agn/adapters/kling.py 末尾 register 调用（无别名）
+        "kling" => Ok(Box::new(KlingAdapter::new(config)?)),
+        // 阶段 2c 音频：别名对齐 Python agn/adapters/audio_adapters.py 末尾 register 调用
+        // （edge-tts / edge_tts / edge 三个别名均指向 EdgeTTSAdapter，免认证）
+        "edge-tts" | "edge_tts" | "edge" => Ok(Box::new(EdgeTtsAdapter::new(config)?)),
+        // 阶段 2c 适配器占位
+        "elevenlabs" | "cartesia" | "deepgram" | "assemblyai" => {
             Err(AibridgeError::ProviderNotFound {
-                provider: format!("{provider}（阶段 2 待实现）"),
+                provider: format!("{provider}（阶段 2c 待实现）"),
             })
         }
         // 未知 provider
@@ -444,6 +453,32 @@ mod tests {
     }
 
     #[test]
+    fn create_kling_returns_adapter() {
+        // 阶段 2b：KlingAdapter 自带 DEFAULT_KLING_BASE_URL 兜底，仅需 api_key
+        let adapter = create_adapter(config_for("kling")).expect("工厂应能创建 kling 适配器");
+        assert_eq!(adapter.provider_type(), "kling");
+    }
+
+    #[test]
+    fn create_edge_tts_returns_adapter() {
+        // 阶段 2c：EdgeTtsAdapter 免认证，无需 api_key（用 default opts 验证免认证构造）
+        let config = ProviderConfig::from_options("edge-tts", ClientOptions::default());
+        let adapter = create_adapter(config).expect("工厂应能创建 edge-tts 适配器");
+        assert_eq!(adapter.provider_type(), "edge-tts");
+    }
+
+    #[test]
+    fn create_edge_tts_aliases_map_to_main_provider_type() {
+        // 别名对齐 Python agn/adapters/audio_adapters.py 末尾 register 调用：
+        // edge_tts / edge -> edge-tts（均指向 EdgeTTSAdapter，免认证）
+        let edge_tts =
+            create_adapter(config_for("edge_tts")).expect("别名 edge_tts 应映射到 edge-tts");
+        assert_eq!(edge_tts.provider_type(), "edge-tts");
+        let edge = create_adapter(config_for("edge")).expect("别名 edge 应映射到 edge-tts");
+        assert_eq!(edge.provider_type(), "edge-tts");
+    }
+
+    #[test]
     fn create_additional_models_aliases_map_to_main_provider_type() {
         // 别名对齐 Python agn/adapters/additional_models.py 末尾 register 调用：
         // xaigrok -> grok / lingyiwanwu -> yi / shangtang -> sensenova / tencent_hunyuan -> hunyuan
@@ -470,8 +505,8 @@ mod tests {
 
     #[test]
     fn create_phase2_adapter_returns_phase2_message() {
-        // kling 仍为阶段 2 占位（未实现），返 ProviderNotFound
-        let result = create_adapter(config_for("kling"));
+        // elevenlabs 仍为阶段 2c 占位（未实现），返 ProviderNotFound
+        let result = create_adapter(config_for("elevenlabs"));
         if let Err(AibridgeError::ProviderNotFound { provider }) = result {
             assert!(provider.contains("阶段 2"));
         } else {
@@ -485,6 +520,7 @@ mod tests {
         assert!(is_known_provider("openai"));
         assert!(is_known_provider("edge-tts"));
         assert!(is_known_provider("assemblyai"));
+        assert!(is_known_provider("kling"));
         // 阶段 2a 已实现 provider 应被识别
         assert!(is_known_provider("azure"));
         assert!(is_known_provider("siliconflow"));

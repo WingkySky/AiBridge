@@ -57,3 +57,9 @@ pub mod runway;
 
 /// Pika 适配器：阶段 2b 独立协议，视频生成（文生视频/图生视频/任务轮询）
 pub mod pika;
+
+/// Kling 适配器：阶段 2b 独立协议，可灵视频生成（文生视频/图生视频/任务轮询）
+pub mod kling;
+
+/// Edge TTS 适配器：阶段 2c 音频，免费文字转语音（免认证，WebSocket 协议）
+pub mod edge_tts;

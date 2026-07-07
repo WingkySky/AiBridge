@@ -69,9 +69,9 @@ impl Client {
     /// 判断 provider 是否为免认证（不需要 API Key）
     ///
     /// 阶段 0.6：`echo` 为 mock 适配器，免认证便于五语言管线验证。
-    /// 阶段 2c 起将补充 edge-tts 等真实免认证 provider。
+    /// 阶段 2c：`edge-tts` 为真实免认证 provider（微软免费 TTS，含别名 edge_tts / edge）。
     fn is_free_provider(provider: &str) -> bool {
-        matches!(provider, "echo")
+        matches!(provider, "echo" | "edge-tts" | "edge_tts" | "edge")
     }
 
     /// 启动客户端（初始化适配器）
@@ -205,6 +205,15 @@ mod tests {
         // echo 免认证：无 api_key 也能创建客户端
         let result = Client::new("echo", ClientOptions::default());
         assert!(result.is_ok(), "echo 应免认证创建客户端");
+    }
+
+    #[test]
+    fn new_edge_tts_without_api_key_succeeds() {
+        // edge-tts 免认证：无 api_key 也能创建客户端（含别名 edge_tts / edge）
+        let result = Client::new("edge-tts", ClientOptions::default());
+        assert!(result.is_ok(), "edge-tts 应免认证创建客户端");
+        let result_alias = Client::new("edge", ClientOptions::default());
+        assert!(result_alias.is_ok(), "edge 别名应免认证创建客户端");
     }
 
     #[tokio::test]
