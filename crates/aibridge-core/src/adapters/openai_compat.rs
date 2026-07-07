@@ -244,7 +244,10 @@ impl OpenAiCompatAdapter {
     /// 将统一 `ChatRequest` 转为 OpenAI 协议的 JSON 请求体。
     /// 通用参数走 `OPENAI_COMPATIBLE_MAPPING`（当前为透传），
     /// provider 特有参数走 `extra` 透传。
-    fn build_chat_body(&self, req: &ChatRequest, stream: bool) -> Value {
+    ///
+    /// 对子适配器开放（pub）：Azure 等子适配器复用请求体构造，
+    /// 仅 override HTTP path/header（见设计文档 10.1 节）。
+    pub fn build_chat_body(&self, req: &ChatRequest, stream: bool) -> Value {
         // 序列化统一请求，得到基础字段
         let mut body = serde_json::to_value(req).unwrap_or_else(|_| json!({}));
         // 强制覆盖 stream 标志（统一请求的 stream 字段默认 false，流式调用时需置 true）
@@ -414,7 +417,9 @@ impl OpenAiCompatAdapter {
     // ==================== 内部：请求体构造 ====================
 
     /// 构造 OpenAI images/generations 请求体
-    fn build_image_body(&self, req: &ImageRequest) -> Value {
+    ///
+    /// 对子适配器开放（pub）：Azure 等子适配器复用请求体构造。
+    pub fn build_image_body(&self, req: &ImageRequest) -> Value {
         let mut body = serde_json::to_value(req).unwrap_or_else(|_| json!({}));
         // extra 透传
         if let Some(obj) = body.as_object_mut() {
@@ -430,7 +435,9 @@ impl OpenAiCompatAdapter {
     }
 
     /// 构造 OpenAI embeddings 请求体
-    fn build_embed_body(&self, req: &EmbedRequest) -> Value {
+    ///
+    /// 对子适配器开放（pub）：Azure 等子适配器复用请求体构造。
+    pub fn build_embed_body(&self, req: &EmbedRequest) -> Value {
         let mut body = serde_json::to_value(req).unwrap_or_else(|_| json!({}));
         // extra 透传
         if let Some(obj) = body.as_object_mut() {
@@ -448,7 +455,13 @@ impl OpenAiCompatAdapter {
     // ==================== 内部：响应解析 ====================
 
     /// 解析 OpenAI chat/completions 响应 → ChatCompletion
-    fn parse_chat_completion(&self, value: &Value, fallback_model: &str) -> Result<ChatCompletion> {
+    ///
+    /// 对子适配器开放（pub）：Azure 等子适配器复用响应解析。
+    pub fn parse_chat_completion(
+        &self,
+        value: &Value,
+        fallback_model: &str,
+    ) -> Result<ChatCompletion> {
         let id = value
             .get("id")
             .and_then(|v| v.as_str())
@@ -504,7 +517,9 @@ impl OpenAiCompatAdapter {
     /// 解析单个 SSE chunk（OpenAI 流式格式）→ Option<ChatCompletionChunk>
     ///
     /// 返回 None 表示该 chunk 无有效 choices（如纯 usage 块），调用方跳过。
-    fn parse_chunk(value: &Value, fallback_model: &str) -> Result<Option<ChatCompletionChunk>> {
+    ///
+    /// 对子适配器开放（pub）：Azure 等子适配器复用流式 chunk 解析。
+    pub fn parse_chunk(value: &Value, fallback_model: &str) -> Result<Option<ChatCompletionChunk>> {
         let id = value
             .get("id")
             .and_then(|v| v.as_str())
@@ -552,7 +567,9 @@ impl OpenAiCompatAdapter {
     }
 
     /// 解析 OpenAI images/generations 响应 → ImageResult
-    fn parse_image_result(&self, value: &Value, fallback_model: &str) -> Result<ImageResult> {
+    ///
+    /// 对子适配器开放（pub）：Azure 等子适配器复用响应解析。
+    pub fn parse_image_result(&self, value: &Value, fallback_model: &str) -> Result<ImageResult> {
         let id = value
             .get("id")
             .and_then(|v| v.as_str())
@@ -587,7 +604,9 @@ impl OpenAiCompatAdapter {
     }
 
     /// 解析 OpenAI embeddings 响应 → EmbeddingResult
-    fn parse_embedding_result(
+    ///
+    /// 对子适配器开放（pub）：Azure 等子适配器复用响应解析。
+    pub fn parse_embedding_result(
         &self,
         value: &Value,
         fallback_model: &str,
