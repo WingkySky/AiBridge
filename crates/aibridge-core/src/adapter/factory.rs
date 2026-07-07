@@ -15,6 +15,7 @@ use crate::adapters::aggregation_platforms::{
     CloudflareAIAdapter, FireworksAIAdapter, SiliconFlowAdapter, TogetherAIAdapter,
 };
 use crate::adapters::agnes::AgnesAdapter;
+use crate::adapters::anthropic::AnthropicAdapter;
 use crate::adapters::azure::AzureAdapter;
 use crate::adapters::chinese::{
     DoubaoAdapter, ErnieAdapter, KimiAdapter, MiniMaxAdapter, QwenAdapter, ZhipuAdapter,
@@ -26,6 +27,7 @@ use crate::adapters::more_models::{
     CohereAdapter, DeepSeekAdapter, MistralAdapter, PerplexityAdapter, StepFunAdapter,
 };
 use crate::adapters::openai::OpenAiAdapter;
+use crate::adapters::stability::StabilityAdapter;
 use crate::adapters::volcengine_cv::VolcengineCvAdapter;
 use crate::config::ProviderConfig;
 use crate::error::{AibridgeError, Result};
@@ -67,12 +69,13 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "ernie",
     "kimi",
     "minimax",
-    // 阶段 2b/2c 待实现：
+    // 阶段 2b 第一批独立协议（已实现）：
     "anthropic",
+    "stability",
+    // 阶段 2b/2c 待实现：
     "runway",
     "pika",
     "kling",
-    "stability",
     "edge-tts",
     "elevenlabs",
     "cartesia",
@@ -128,9 +131,12 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         "ernie" => Ok(Box::new(ErnieAdapter::new(config)?)),
         "kimi" => Ok(Box::new(KimiAdapter::new(config)?)),
         "minimax" => Ok(Box::new(MiniMaxAdapter::new(config)?)),
+        // 阶段 2b 独立协议：别名对齐 Python agn/adapters/{anthropic,stability}.py 末尾 register 调用（均无别名）
+        "anthropic" => Ok(Box::new(AnthropicAdapter::new(config)?)),
+        "stability" => Ok(Box::new(StabilityAdapter::new(config)?)),
         // 阶段 2 适配器占位
-        "anthropic" | "runway" | "pika" | "kling" | "stability" | "edge-tts" | "elevenlabs"
-        | "cartesia" | "deepgram" | "assemblyai" => Err(AibridgeError::ProviderNotFound {
+        "runway" | "pika" | "kling" | "edge-tts" | "elevenlabs" | "cartesia" | "deepgram"
+        | "assemblyai" => Err(AibridgeError::ProviderNotFound {
             provider: format!("{provider}（阶段 2 待实现）"),
         }),
         // 未知 provider
@@ -401,6 +407,22 @@ mod tests {
     }
 
     #[test]
+    fn create_anthropic_returns_adapter() {
+        // 阶段 2b：AnthropicAdapter 自带 DEFAULT_ANTHROPIC_BASE_URL 兜底，仅需 api_key
+        let adapter =
+            create_adapter(config_for("anthropic")).expect("工厂应能创建 anthropic 适配器");
+        assert_eq!(adapter.provider_type(), "anthropic");
+    }
+
+    #[test]
+    fn create_stability_returns_adapter() {
+        // 阶段 2b：StabilityAdapter 自带 DEFAULT_STABILITY_BASE_URL 兜底，仅需 api_key
+        let adapter =
+            create_adapter(config_for("stability")).expect("工厂应能创建 stability 适配器");
+        assert_eq!(adapter.provider_type(), "stability");
+    }
+
+    #[test]
     fn create_additional_models_aliases_map_to_main_provider_type() {
         // 别名对齐 Python agn/adapters/additional_models.py 末尾 register 调用：
         // xaigrok -> grok / lingyiwanwu -> yi / shangtang -> sensenova / tencent_hunyuan -> hunyuan
@@ -427,7 +449,8 @@ mod tests {
 
     #[test]
     fn create_phase2_adapter_returns_phase2_message() {
-        let result = create_adapter(config_for("anthropic"));
+        // runway 仍为阶段 2 占位（未实现），返 ProviderNotFound
+        let result = create_adapter(config_for("runway"));
         if let Err(AibridgeError::ProviderNotFound { provider }) = result {
             assert!(provider.contains("阶段 2"));
         } else {
@@ -466,6 +489,9 @@ mod tests {
         assert!(is_known_provider("ernie"));
         assert!(is_known_provider("kimi"));
         assert!(is_known_provider("minimax"));
+        // 阶段 2b 第一批独立协议
+        assert!(is_known_provider("anthropic"));
+        assert!(is_known_provider("stability"));
     }
 
     #[test]

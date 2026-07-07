@@ -45,3 +45,9 @@ pub mod emerging_models;
 
 /// 中文模型适配器：阶段 2a，含 Qwen/Zhipu/Doubao/Ernie/Kimi/MiniMax 六个 OpenAI 兼容子适配器
 pub mod chinese;
+
+/// Anthropic Claude 适配器：阶段 2b 独立协议，文本对话/流式/多模态
+pub mod anthropic;
+
+/// Stability AI 适配器：阶段 2b 独立协议，文生图/图生图
+pub mod stability;
