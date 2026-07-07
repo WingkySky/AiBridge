@@ -38,10 +38,7 @@ use aibridge_core::model::chat::{ChatCompletion, ChatCompletionChunk, ChatReques
 fn map_error(err: AibridgeError) -> Error {
     let code = err.code();
     let message = err.to_string();
-    Error::new(
-        Status::GenericFailure,
-        format!("[{code}] {message}"),
-    )
+    Error::new(Status::GenericFailure, format!("[{code}] {message}"))
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -361,10 +358,7 @@ impl Client {
                         ))
                     }
                 };
-                obj.insert(
-                    "voice".into(),
-                    serde_json::json!({ "voices": voices }),
-                );
+                obj.insert("voice".into(), serde_json::json!({ "voices": voices }));
             }
         }
 

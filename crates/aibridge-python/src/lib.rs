@@ -24,8 +24,8 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use pyo3::prelude::*;
 use pyo3::coroutine::Coroutine;
+use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
 use tokio::sync::Mutex;
 
@@ -50,13 +50,12 @@ use aibridge_core::model::chat::{
 /// 用 `once_cell::sync::Lazy` 在首次访问时初始化。core 的 async future（含
 /// reqwest 等真实 IO）spawn 到此 runtime 上执行，PyO3 协程通过 await JoinHandle
 /// 取回结果。多线程 runtime 保证真实 adapter 的并发能力。
-static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> =
-    once_cell::sync::Lazy::new(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("初始化 tokio runtime 失败")
-    });
+static RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> = once_cell::sync::Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("初始化 tokio runtime 失败")
+});
 
 // ===========================================================================
 // 错误映射
@@ -92,42 +91,17 @@ create_exception!(
     AibridgeError,
     "认证失败（API Key 无效/过期/无权限）"
 );
-create_exception!(
-    aibridge,
-    RateLimitError,
-    AibridgeError,
-    "请求频率超过限制"
-);
-create_exception!(
-    aibridge,
-    ValidationError,
-    AibridgeError,
-    "请求参数校验错误"
-);
+create_exception!(aibridge, RateLimitError, AibridgeError, "请求频率超过限制");
+create_exception!(aibridge, ValidationError, AibridgeError, "请求参数校验错误");
 create_exception!(
     aibridge,
     ModelNotFoundError,
     AibridgeError,
     "请求的模型不存在"
 );
-create_exception!(
-    aibridge,
-    APIError,
-    AibridgeError,
-    "Provider API 调用错误"
-);
-create_exception!(
-    aibridge,
-    NetworkError,
-    AibridgeError,
-    "网络错误"
-);
-create_exception!(
-    aibridge,
-    TimeoutError,
-    AibridgeError,
-    "请求超时"
-);
+create_exception!(aibridge, APIError, AibridgeError, "Provider API 调用错误");
+create_exception!(aibridge, NetworkError, AibridgeError, "网络错误");
+create_exception!(aibridge, TimeoutError, AibridgeError, "请求超时");
 create_exception!(
     aibridge,
     UnsupportedCapabilityError,
@@ -213,7 +187,10 @@ impl ChatMessage {
     }
 
     fn __repr__(&self) -> String {
-        format!("ChatMessage(role={:?}, content={:?})", self.role, self.content)
+        format!(
+            "ChatMessage(role={:?}, content={:?})",
+            self.role, self.content
+        )
     }
 }
 
@@ -226,13 +203,11 @@ impl ChatMessage {
         if let Ok(msg) = obj.extract::<PyRef<'_, ChatMessage>>() {
             return Self::from_role_content(&msg.role, &msg.content);
         }
-        let dict: std::collections::HashMap<String, String> = obj
-            .extract()
-            .map_err(|_| {
-                pyo3::exceptions::PyTypeError::new_err(
-                    "消息必须是 ChatMessage 或含 role/content 的 dict",
-                )
-            })?;
+        let dict: std::collections::HashMap<String, String> = obj.extract().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "消息必须是 ChatMessage 或含 role/content 的 dict",
+            )
+        })?;
         let role = dict
             .get("role")
             .ok_or_else(|| pyo3::exceptions::PyTypeError::new_err("消息缺少 role 字段"))?;
@@ -360,7 +335,10 @@ impl ChoiceMessage {
     }
 
     fn __repr__(&self) -> String {
-        format!("ChoiceMessage(role={:?}, content={:?})", self.role, self.content)
+        format!(
+            "ChoiceMessage(role={:?}, content={:?})",
+            self.role, self.content
+        )
     }
 }
 
@@ -391,7 +369,10 @@ impl ChatCompletionChunk {
     }
 
     fn __repr__(&self) -> String {
-        format!("ChatCompletionChunk(id={:?}, model={:?})", self.id, self.model)
+        format!(
+            "ChatCompletionChunk(id={:?}, model={:?})",
+            self.id, self.model
+        )
     }
 }
 
@@ -447,7 +428,10 @@ impl ChatChunkDelta {
     }
 
     fn __repr__(&self) -> String {
-        format!("ChatChunkDelta(index={}, content={:?})", self.index, self.content)
+        format!(
+            "ChatChunkDelta(index={}, content={:?})",
+            self.index, self.content
+        )
     }
 }
 
@@ -502,7 +486,11 @@ impl SpeechResult {
     }
 
     fn __repr__(&self) -> String {
-        format!("SpeechResult(size={}, format={:?})", self.audio_data.len(), self.format)
+        format!(
+            "SpeechResult(size={}, format={:?})",
+            self.audio_data.len(),
+            self.format
+        )
     }
 }
 
@@ -795,9 +783,7 @@ impl Client {
             })
             .await
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "chat_stream 任务失败: {e}"
-                ))
+                pyo3::exceptions::PyRuntimeError::new_err(format!("chat_stream 任务失败: {e}"))
             })?;
 
         let stream = stream_result.map_err(map_error)?;
@@ -879,8 +865,14 @@ fn _aibridge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "UnsupportedCapabilityError",
         py.get_type::<UnsupportedCapabilityError>(),
     )?;
-    m.add("ProviderNotFoundError", py.get_type::<ProviderNotFoundError>())?;
-    m.add("VoiceNotAvailableError", py.get_type::<VoiceNotAvailableError>())?;
+    m.add(
+        "ProviderNotFoundError",
+        py.get_type::<ProviderNotFoundError>(),
+    )?;
+    m.add(
+        "VoiceNotAvailableError",
+        py.get_type::<VoiceNotAvailableError>(),
+    )?;
     m.add(
         "ServiceUnavailableError",
         py.get_type::<ServiceUnavailableError>(),
