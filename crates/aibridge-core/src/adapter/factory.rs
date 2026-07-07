@@ -8,6 +8,9 @@
 //! - 阶段 0.4 暂只占位分支（返 ProviderNotFound），具体适配器阶段 1 起填充
 
 use crate::adapter::Adapter;
+use crate::adapters::additional_models::{
+    GrokAdapter, GroqAdapter, HunyuanAdapter, SenseNovaAdapter, YiAdapter,
+};
 use crate::adapters::aggregation_platforms::{
     CloudflareAIAdapter, FireworksAIAdapter, SiliconFlowAdapter, TogetherAIAdapter,
 };
@@ -15,6 +18,9 @@ use crate::adapters::agnes::AgnesAdapter;
 use crate::adapters::azure::AzureAdapter;
 use crate::adapters::echo::EchoAdapter;
 use crate::adapters::gemini::GeminiAdapter;
+use crate::adapters::more_models::{
+    CohereAdapter, DeepSeekAdapter, MistralAdapter, PerplexityAdapter, StepFunAdapter,
+};
 use crate::adapters::openai::OpenAiAdapter;
 use crate::adapters::volcengine_cv::VolcengineCvAdapter;
 use crate::config::ProviderConfig;
@@ -36,6 +42,16 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "togetherai",
     "fireworksai",
     "cloudflareai",
+    "grok",
+    "yi",
+    "sensenova",
+    "hunyuan",
+    "groq",
+    "deepseek",
+    "stepfun",
+    "mistral",
+    "cohere",
+    "perplexity",
     // 阶段 2b/2c 待实现：
     "anthropic",
     "runway",
@@ -74,6 +90,18 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         "cloudflareai" | "cloudflare" | "workersai" => {
             Ok(Box::new(CloudflareAIAdapter::new(config)?))
         }
+        // 扩展模型：别名对齐 Python agn/adapters/additional_models.py 末尾 register 调用
+        "grok" | "xaigrok" => Ok(Box::new(GrokAdapter::new(config)?)),
+        "yi" | "lingyiwanwu" => Ok(Box::new(YiAdapter::new(config)?)),
+        "sensenova" | "shangtang" => Ok(Box::new(SenseNovaAdapter::new(config)?)),
+        "hunyuan" | "tencent_hunyuan" => Ok(Box::new(HunyuanAdapter::new(config)?)),
+        "groq" => Ok(Box::new(GroqAdapter::new(config)?)),
+        // 更多模型：别名对齐 Python agn/adapters/more_models.py 末尾 register 调用
+        "deepseek" => Ok(Box::new(DeepSeekAdapter::new(config)?)),
+        "stepfun" | "step" => Ok(Box::new(StepFunAdapter::new(config)?)),
+        "mistral" => Ok(Box::new(MistralAdapter::new(config)?)),
+        "cohere" => Ok(Box::new(CohereAdapter::new(config)?)),
+        "perplexity" => Ok(Box::new(PerplexityAdapter::new(config)?)),
         // 阶段 2 适配器占位
         "anthropic" | "runway" | "pika" | "kling" | "stability" | "chinese" | "edge-tts"
         | "elevenlabs" | "cartesia" | "deepgram" | "assemblyai" => {
@@ -211,6 +239,94 @@ mod tests {
     }
 
     #[test]
+    fn create_grok_returns_adapter() {
+        // 阶段 2a additional_models：GrokAdapter 自带 DEFAULT_GROK_BASE_URL 回退，仅需 api_key
+        let adapter = create_adapter(config_for("grok")).expect("工厂应能创建 grok 适配器");
+        assert_eq!(adapter.provider_type(), "grok");
+    }
+
+    #[test]
+    fn create_yi_returns_adapter() {
+        let adapter = create_adapter(config_for("yi")).expect("工厂应能创建 yi 适配器");
+        assert_eq!(adapter.provider_type(), "yi");
+    }
+
+    #[test]
+    fn create_sensenova_returns_adapter() {
+        let adapter =
+            create_adapter(config_for("sensenova")).expect("工厂应能创建 sensenova 适配器");
+        assert_eq!(adapter.provider_type(), "sensenova");
+    }
+
+    #[test]
+    fn create_hunyuan_returns_adapter() {
+        let adapter = create_adapter(config_for("hunyuan")).expect("工厂应能创建 hunyuan 适配器");
+        assert_eq!(adapter.provider_type(), "hunyuan");
+    }
+
+    #[test]
+    fn create_groq_returns_adapter() {
+        let adapter = create_adapter(config_for("groq")).expect("工厂应能创建 groq 适配器");
+        assert_eq!(adapter.provider_type(), "groq");
+    }
+
+    #[test]
+    fn create_deepseek_returns_adapter() {
+        let adapter = create_adapter(config_for("deepseek")).expect("工厂应能创建 deepseek 适配器");
+        assert_eq!(adapter.provider_type(), "deepseek");
+    }
+
+    #[test]
+    fn create_stepfun_returns_adapter() {
+        let adapter = create_adapter(config_for("stepfun")).expect("工厂应能创建 stepfun 适配器");
+        assert_eq!(adapter.provider_type(), "stepfun");
+    }
+
+    #[test]
+    fn create_mistral_returns_adapter() {
+        let adapter = create_adapter(config_for("mistral")).expect("工厂应能创建 mistral 适配器");
+        assert_eq!(adapter.provider_type(), "mistral");
+    }
+
+    #[test]
+    fn create_cohere_returns_adapter() {
+        let adapter = create_adapter(config_for("cohere")).expect("工厂应能创建 cohere 适配器");
+        assert_eq!(adapter.provider_type(), "cohere");
+    }
+
+    #[test]
+    fn create_perplexity_returns_adapter() {
+        let adapter =
+            create_adapter(config_for("perplexity")).expect("工厂应能创建 perplexity 适配器");
+        assert_eq!(adapter.provider_type(), "perplexity");
+    }
+
+    #[test]
+    fn create_additional_models_aliases_map_to_main_provider_type() {
+        // 别名对齐 Python agn/adapters/additional_models.py 末尾 register 调用：
+        // xaigrok -> grok / lingyiwanwu -> yi / shangtang -> sensenova / tencent_hunyuan -> hunyuan
+        let xaigrok = create_adapter(config_for("xaigrok")).expect("别名 xaigrok 应映射到 grok");
+        assert_eq!(xaigrok.provider_type(), "grok");
+        let lingyiwanwu =
+            create_adapter(config_for("lingyiwanwu")).expect("别名 lingyiwanwu 应映射到 yi");
+        assert_eq!(lingyiwanwu.provider_type(), "yi");
+        let shangtang =
+            create_adapter(config_for("shangtang")).expect("别名 shangtang 应映射到 sensenova");
+        assert_eq!(shangtang.provider_type(), "sensenova");
+        let tencent_hunyuan = create_adapter(config_for("tencent_hunyuan"))
+            .expect("别名 tencent_hunyuan 应映射到 hunyuan");
+        assert_eq!(tencent_hunyuan.provider_type(), "hunyuan");
+    }
+
+    #[test]
+    fn create_more_models_aliases_map_to_main_provider_type() {
+        // 别名对齐 Python agn/adapters/more_models.py 末尾 register 调用：
+        // step -> stepfun（deepseek/mistral/cohere/perplexity 无别名）
+        let step = create_adapter(config_for("step")).expect("别名 step 应映射到 stepfun");
+        assert_eq!(step.provider_type(), "stepfun");
+    }
+
+    #[test]
     fn create_phase2_adapter_returns_phase2_message() {
         let result = create_adapter(config_for("anthropic"));
         if let Err(AibridgeError::ProviderNotFound { provider }) = result {
@@ -230,6 +346,17 @@ mod tests {
         assert!(is_known_provider("azure"));
         assert!(is_known_provider("siliconflow"));
         assert!(is_known_provider("cloudflareai"));
+        // 阶段 2a 第二批 additional_models + more_models
+        assert!(is_known_provider("grok"));
+        assert!(is_known_provider("yi"));
+        assert!(is_known_provider("sensenova"));
+        assert!(is_known_provider("hunyuan"));
+        assert!(is_known_provider("groq"));
+        assert!(is_known_provider("deepseek"));
+        assert!(is_known_provider("stepfun"));
+        assert!(is_known_provider("mistral"));
+        assert!(is_known_provider("cohere"));
+        assert!(is_known_provider("perplexity"));
     }
 
     #[test]

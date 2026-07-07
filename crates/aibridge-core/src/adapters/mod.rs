@@ -33,3 +33,9 @@ pub mod azure;
 
 /// 聚合平台适配器：阶段 2a，含 SiliconFlow/TogetherAI/FireworksAI/CloudflareAI 四个 OpenAI 兼容子适配器
 pub mod aggregation_platforms;
+
+/// 扩展模型适配器：阶段 2a，含 Grok/Yi/SenseNova/Hunyuan/Groq 五个 OpenAI 兼容子适配器
+pub mod additional_models;
+
+/// 更多模型适配器：阶段 2a，含 DeepSeek/StepFun/Mistral/Cohere/Perplexity 五个 OpenAI 兼容子适配器
+pub mod more_models;
