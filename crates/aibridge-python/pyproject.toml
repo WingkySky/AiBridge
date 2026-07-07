@@ -15,4 +15,10 @@ classifiers = [
 dynamic = ["version"]
 
 [tool.maturin]
+# lib name 为 `_aibridge`（见 Cargo.toml [lib] name），故 Rust pymodule 函数名也是
+# `_aibridge`（生成 `PyInit__aibridge` 符号）。通过 `module-name` 把它映射到 Python
+# 顶层模块 `aibridge`，使 `import aibridge` 正常工作，同时 cdylib 产物名为
+# `lib_aibridge.dylib`（macOS）/ `lib_aibridge.so`（Linux），不与 aibridge-ffi 的
+# `libaibridge.dylib` 冲突。
+module-name = "aibridge"
 features = ["pyo3/extension-module"]

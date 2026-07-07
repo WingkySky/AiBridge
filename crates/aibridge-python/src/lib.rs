@@ -848,8 +848,14 @@ impl Client {
 // ===========================================================================
 
 /// Python 模块入口：`import aibridge`
+///
+/// 函数名为 `_aibridge`（与 `[lib] name = "_aibridge"` 一致），生成 `PyInit__aibridge`
+/// 符号。`#[pyo3(name = "aibridge")]` 把模块的 Python 名重写为 `aibridge`，配合
+/// pyproject.toml 的 `module-name = "aibridge"`，使 `import aibridge` 正常工作。
+/// lib name 用下划线前缀以避免与 aibridge-ffi 的 `libaibridge.dylib` 产物冲突。
 #[pymodule]
-fn aibridge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+#[pyo3(name = "aibridge")]
+fn _aibridge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
 
     // 触发全局 runtime 初始化（首次访问 Lazy 即建）

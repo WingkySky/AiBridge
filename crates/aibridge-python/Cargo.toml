@@ -10,7 +10,14 @@ description = "AIBridge Python 绑定（PyO3，直连 aibridge-core，原生 asy
 
 [lib]
 crate-type = ["cdylib"]
-name = "aibridge"
+# lib name 用 `_aibridge`（而非 `aibridge`）以避免与 aibridge-ffi 的
+# `libaibridge.dylib` 产物冲突：两者 `[lib] name` 都为 `aibridge` 时，`cargo build`
+# 会把 cdylib 都输出到 target/debug/libaibridge.dylib 互相覆盖，导致 `maturin develop`
+# 后 dylib 变成 PyO3 版本（无 C FFI 符号），Go/JVM 链接失败。
+#
+# Python import 名由 `#[pymodule] fn aibridge` 决定（见 src/lib.rs），与 lib name 无关，
+# 故改 lib name 不影响 `import aibridge`。下划线前缀是 Python C 扩展惯例。
+name = "_aibridge"
 
 [dependencies]
 aibridge-core.workspace = true
