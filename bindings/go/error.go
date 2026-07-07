@@ -7,7 +7,7 @@
 //
 //	var err error = ...
 //	if ae, ok := err.(AibridgeError); ok {
-//	    fmt.Println(ae.Code()) // "rate_limit" 等
+//	    fmt.Println(ae.Code()) // "rate_limit_error" 等
 //	}
 package aibridge
 
@@ -21,7 +21,7 @@ import (
 // 对应设计文档 9.3 节：Go 用 error + 类型断言接口 type AibridgeError interface{ Code() string }
 type AibridgeError interface {
 	error
-	Code() string        // 错误码（如 "rate_limit"、"validation_error"）
+	Code() string        // 错误码（如 "rate_limit_error"、"validation_error"）
 	Retryable() bool     // 是否可重试
 	Message() string     // 原始错误消息
 }
@@ -84,15 +84,15 @@ func newFfiError(msg string) AibridgeError {
 	}
 }
 
-// 常见错误码常量（与 aibridge.h 的 AIBRIDGE_ERR_* 宏对齐，供需要按码判断时使用）
+// 常见错误码常量（与 aibridge-core error.rs 的 AibridgeError::code() 实际返回值对齐）
 const (
-	errCodeAuthentication        = "authentication"
-	errCodeRateLimit             = "rate_limit"
+	errCodeAuthentication        = "authentication_error"
+	errCodeRateLimit             = "rate_limit_error"
 	errCodeValidation            = "validation_error"
 	errCodeModelNotFound         = "model_not_found"
 	errCodeAPI                   = "api_error"
-	errCodeNetwork               = "network"
-	errCodeTimeout               = "timeout"
+	errCodeNetwork               = "network_error"
+	errCodeTimeout               = "timeout_error"
 	errCodeUnsupportedCapability = "unsupported_capability"
 	errCodeProviderNotFound      = "provider_not_found"
 	errCodeVoiceNotAvailable     = "voice_not_available"

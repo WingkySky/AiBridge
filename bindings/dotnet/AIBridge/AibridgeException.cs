@@ -6,17 +6,22 @@ namespace AIBridge;
 // 异常体系
 //
 // 对应设计文档第 9 节 .NET 异常映射：AibridgeException + 子类。
-// 子类与 core AibridgeError 枚举变体一一对应（rate_limit/authentication/...）。
+// 子类与 core AibridgeError 枚举变体一一对应（rate_limit_error/authentication_error/...）。
 //
 // FFI 错误模型（设计文档 7.4）：aibridge_status_t 返回码 + aibridge_last_error()
 // 线程局部 JSON：{"code":"...","message":"...","details":...,"retryable":bool}。
 // Client 在 FFI 失败后同线程读取 last_error 转存，按 code 映射为子类异常。
+//
+// 注意：code 字符串必须与 aibridge-core error.rs 的 AibridgeError::code() 实际返回值
+// 完全一致（authentication_error / rate_limit_error / validation_error / model_not_found /
+// api_error / network_error / timeout_error / unsupported_capability / provider_not_found /
+// voice_not_available / service_unavailable），以保证五语言跨绑定错误码统一。
 // ============================================================================
 
 /// <summary>AIBridge 异常基类。</summary>
 public class AibridgeException : Exception
 {
-    /// <summary>错误码字符串（如 "rate_limit"、"authentication"）。</summary>
+    /// <summary>错误码字符串（如 "rate_limit_error"、"authentication_error"）。</summary>
     public string Code { get; }
 
     /// <summary>是否可重试。</summary>
@@ -84,18 +89,18 @@ public class AibridgeException : Exception
         };
     }
 
-    /// <summary>按 last_error 的 code 字段映射子类（core AibridgeError 变体名）。</summary>
+    /// <summary>按 last_error 的 code 字段映射子类（与 core AibridgeError::code() 对齐）。</summary>
     private static AibridgeException? MapByCode(string code, string message, bool retryable, JsonElement? details)
     {
         return code switch
         {
-            "authentication" => new AuthenticationException(message, retryable, details),
-            "rate_limit" => new RateLimitException(message, retryable, details),
+            "authentication_error" => new AuthenticationException(message, retryable, details),
+            "rate_limit_error" => new RateLimitException(message, retryable, details),
             "validation_error" => new ValidationException(message, retryable, details),
             "model_not_found" => new ModelNotFoundException(message, retryable, details),
             "api_error" => new ApiException(message, retryable, details),
             "network_error" => new NetworkException(message, retryable, details),
-            "timeout" => new TimeoutException_(message, retryable, details),
+            "timeout_error" => new TimeoutException_(message, retryable, details),
             "unsupported_capability" => new UnsupportedCapabilityException(message, retryable, details),
             "provider_not_found" => new ProviderNotFoundException(message, retryable, details),
             "voice_not_available" => new VoiceNotAvailableException(message, retryable, details),
@@ -110,7 +115,7 @@ public class AibridgeException : Exception
 public class AuthenticationException : AibridgeException
 {
     public AuthenticationException(string msg, bool retryable = false, JsonElement? details = null)
-        : base(msg, "authentication", retryable, details) { }
+        : base(msg, "authentication_error", retryable, details) { }
 }
 
 public class RateLimitException : AibridgeException
@@ -119,7 +124,7 @@ public class RateLimitException : AibridgeException
     public double? RetryAfter { get; }
 
     public RateLimitException(string msg, bool retryable = true, JsonElement? details = null)
-        : base(msg, "rate_limit", retryable, details)
+        : base(msg, "rate_limit_error", retryable, details)
     {
         // 尝试从 details.retry_after 读取
         if (details.HasValue && details.Value.TryGetProperty("retry_after", out JsonElement r)
@@ -158,7 +163,7 @@ public class NetworkException : AibridgeException
 public class TimeoutException_ : AibridgeException
 {
     public TimeoutException_(string msg, bool retryable = true, JsonElement? details = null)
-        : base(msg, "timeout", retryable, details) { }
+        : base(msg, "timeout_error", retryable, details) { }
 }
 
 public class UnsupportedCapabilityException : AibridgeException
