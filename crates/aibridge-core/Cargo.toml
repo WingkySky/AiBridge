@@ -20,3 +20,7 @@ thiserror.workspace = true
 tracing.workspace = true
 once_cell.workspace = true
 bytes.workspace = true
+# base64 编解码（util.rs 用，处理 data URI / 音频 base64）
+base64 = "0.22"
+# 随机数（router.rs 的 round_robin/random/weighted 策略用）
+rand = "0.8"

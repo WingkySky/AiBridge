@@ -8,17 +8,17 @@
 //! 对应 Python v1 (agn-sdk) 的 agn/ 目录，五层架构保持一致：
 //! API 层(client) → 路由层(router) → 适配器层(adapter) → 核心层(http/retry/error/config) → 模型层(model)
 
-// 模块声明（阶段 0.2–0.4 逐步填充，暂注释）
-// pub mod error;
-// pub mod config;
-// pub mod http;
-// pub mod retry;
-// pub mod util;
-// pub mod model;
-// pub mod adapter;
-// pub mod adapters;
-// pub mod client;
-// pub mod router;
+// 模块声明（阶段 0.2–0.4）
+pub mod adapter;
+pub mod adapters;
+pub mod client;
+pub mod config;
+pub mod error;
+pub mod http;
+pub mod model;
+pub mod retry;
+pub mod router;
+pub mod util;
 
 /// crate 版本号
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
