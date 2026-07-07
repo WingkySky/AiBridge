@@ -15,3 +15,15 @@ pub mod echo;
 
 /// OpenAI 兼容协议适配器地基：阶段 1.0 实现，为 openai/agnes 等子适配器提供共享基础
 pub mod openai_compat;
+
+/// Agnes 适配器：阶段 1 MVP，OpenAI 兼容协议的子适配器
+pub mod agnes;
+
+/// Gemini 适配器：阶段 1 MVP，Google Gemini 独立协议
+pub mod gemini;
+
+/// OpenAI 适配器：阶段 1 MVP，OpenAI 官方协议
+pub mod openai;
+
+/// 火山引擎 CV 适配器：阶段 1 MVP，火山引擎视觉/视频生成协议
+pub mod volcengine_cv;

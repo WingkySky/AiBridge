@@ -168,13 +168,10 @@ mod tests {
     }
 
     #[test]
-    fn new_with_key_reaches_factory_and_returns_provider_not_found() {
-        // 阶段 0.4：工厂占位返 ProviderNotFound
-        let result = Client::new("openai", ClientOptions::builder().api_key("sk-xxx").build());
-        assert!(matches!(
-            result,
-            Err(AibridgeError::ProviderNotFound { .. })
-        ));
+    fn new_with_key_reaches_factory_and_creates_adapter() {
+        // 阶段 1：工厂已能构造真实 OpenAiAdapter（仅校验 Client 构建成功，不触发 HTTP）
+        let _client = Client::new("openai", ClientOptions::builder().api_key("sk-xxx").build())
+            .expect("应成功创建 openai Client（api_key 已提供，工厂应返 Ok）");
     }
 
     #[test]

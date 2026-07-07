@@ -8,7 +8,11 @@
 //! - 阶段 0.4 暂只占位分支（返 ProviderNotFound），具体适配器阶段 1 起填充
 
 use crate::adapter::Adapter;
+use crate::adapters::agnes::AgnesAdapter;
 use crate::adapters::echo::EchoAdapter;
+use crate::adapters::gemini::GeminiAdapter;
+use crate::adapters::openai::OpenAiAdapter;
+use crate::adapters::volcengine_cv::VolcengineCvAdapter;
 use crate::config::ProviderConfig;
 use crate::error::{AibridgeError, Result};
 
@@ -44,17 +48,15 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
 /// `echo` 为阶段 0.6 管线验证用 mock 适配器，已实现；
 /// 其余 provider 阶段 0.4 占位（返 ProviderNotFound），阶段 1 起填充。
 pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
-    let provider = config.provider_type.as_str();
-    match provider {
+    let provider = config.provider_type.clone();
+    match provider.as_str() {
         // Echo（Mock）适配器：阶段 0.6 管线验证用，已实现
         "echo" => Ok(Box::new(EchoAdapter::new())),
-        // 阶段 1 MVP 适配器（阶段 1.0 起填充实际构造逻辑）
-        "openai" | "agnes" | "volcengine_cv" | "gemini" => {
-            // TODO(阶段 1): 引入 adapters::openai::OpenAiAdapter 等具体实现
-            Err(AibridgeError::ProviderNotFound {
-                provider: format!("{provider}（阶段 1 待实现）"),
-            })
-        }
+        // 阶段 1 MVP 适配器：阶段 1.0 已实现具体构造逻辑
+        "openai" => Ok(Box::new(OpenAiAdapter::new(config)?)),
+        "agnes" => Ok(Box::new(AgnesAdapter::new(config)?)),
+        "volcengine_cv" => Ok(Box::new(VolcengineCvAdapter::new(config)?)),
+        "gemini" => Ok(Box::new(GeminiAdapter::new(config)?)),
         // 阶段 2 适配器占位
         "azure"
         | "anthropic"
@@ -103,43 +105,29 @@ mod tests {
     }
 
     #[test]
-    fn create_openai_returns_pending_for_phase0() {
-        let result = create_adapter(config_for("openai"));
-        // 阶段 0.4：占位返 ProviderNotFound（待阶段 1 实现）
-        assert!(matches!(
-            result,
-            Err(AibridgeError::ProviderNotFound { .. })
-        ));
-        if let Err(AibridgeError::ProviderNotFound { provider }) = result {
-            assert!(provider.contains("阶段 1"));
-        }
+    fn create_openai_returns_adapter() {
+        // 阶段 1：工厂已能构造真实 OpenAiAdapter（仅校验构造成功，不触发 HTTP）
+        let adapter = create_adapter(config_for("openai")).expect("工厂应能创建 openai 适配器");
+        assert_eq!(adapter.provider_type(), "openai");
     }
 
     #[test]
-    fn create_agnes_returns_pending() {
-        let result = create_adapter(config_for("agnes"));
-        assert!(matches!(
-            result,
-            Err(AibridgeError::ProviderNotFound { .. })
-        ));
+    fn create_agnes_returns_adapter() {
+        let adapter = create_adapter(config_for("agnes")).expect("工厂应能创建 agnes 适配器");
+        assert_eq!(adapter.provider_type(), "agnes");
     }
 
     #[test]
-    fn create_volcengine_cv_returns_pending() {
-        let result = create_adapter(config_for("volcengine_cv"));
-        assert!(matches!(
-            result,
-            Err(AibridgeError::ProviderNotFound { .. })
-        ));
+    fn create_volcengine_cv_returns_adapter() {
+        let adapter =
+            create_adapter(config_for("volcengine_cv")).expect("工厂应能创建 volcengine_cv 适配器");
+        assert_eq!(adapter.provider_type(), "volcengine_cv");
     }
 
     #[test]
-    fn create_gemini_returns_pending() {
-        let result = create_adapter(config_for("gemini"));
-        assert!(matches!(
-            result,
-            Err(AibridgeError::ProviderNotFound { .. })
-        ));
+    fn create_gemini_returns_adapter() {
+        let adapter = create_adapter(config_for("gemini")).expect("工厂应能创建 gemini 适配器");
+        assert_eq!(adapter.provider_type(), "gemini");
     }
 
     #[test]
