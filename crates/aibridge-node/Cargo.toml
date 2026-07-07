@@ -1,0 +1,22 @@
+[package]
+name = "aibridge-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AIBridge Node.js 绑定（napi-rs，直连 aibridge-core，原生 Promise）"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aibridge-core.workspace = true
+napi = { version = "2", features = ["napi8", "tokio_rt"] }
+napi-derive = "2"
+tokio.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+napi-build = "2"

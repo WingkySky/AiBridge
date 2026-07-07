@@ -1,0 +1,20 @@
+[package]
+name = "aibridge-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AIBridge Python 绑定（PyO3，直连 aibridge-core，原生 asyncio）"
+
+[lib]
+crate-type = ["cdylib"]
+name = "aibridge"
+
+[dependencies]
+aibridge-core.workspace = true
+# PyO3 0.22+ 原生支持 async fn，不再需要 pyo3-asyncio
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"] }
+tokio.workspace = true
+serde_json.workspace = true

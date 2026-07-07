@@ -144,3 +144,14 @@ Thumbs.db
 # Project specific
 output/
 *.egg-info/
+
+# Rust（target/ 已在上方忽略）
+# Cargo.lock 提交以保证可复现构建（workspace 含 cdylib 产物）
+
+# Node / napi-rs
+node_modules/
+*.node
+
+# 原生库发布产物（target/ 外的）
+*.dylib
+*.dll

@@ -1,0 +1,24 @@
+[package]
+name = "aibridge-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AIBridge C ABI - 供 Go/JVM/.NET 调用的 FFI 层"
+
+[lib]
+# cdylib: 动态库（.so/.dylib/.dll）；staticlib: 静态库；rlib: 内部测试用
+crate-type = ["cdylib", "staticlib", "rlib"]
+name = "aibridge"
+
+[dependencies]
+aibridge-core.workspace = true
+tokio.workspace = true
+once_cell.workspace = true
+serde_json.workspace = true
+
+# cbindgen 头文件生成（阶段 0.5 启用）
+# [build-dependencies]
+# cbindgen = "0.27"
