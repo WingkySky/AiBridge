@@ -24,3 +24,8 @@ bytes.workspace = true
 base64 = "0.22"
 # 随机数（router.rs 的 round_robin/random/weighted 策略用）
 rand = "0.8"
+
+[dev-dependencies]
+# HTTP mock，用于适配器单测（openai_compat 等）
+mockito = "1"
+tokio = { workspace = true, features = ["full", "test-util"] }

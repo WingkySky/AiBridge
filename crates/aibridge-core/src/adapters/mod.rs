@@ -12,3 +12,6 @@
 
 /// Echo（Mock）适配器：阶段 0.6 五语言管线验证用，不调网络返固定/回显响应
 pub mod echo;
+
+/// OpenAI 兼容协议适配器地基：阶段 1.0 实现，为 openai/agnes 等子适配器提供共享基础
+pub mod openai_compat;
