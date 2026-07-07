@@ -63,3 +63,9 @@ pub mod kling;
 
 /// Edge TTS 适配器：阶段 2c 音频，免费文字转语音（免认证，WebSocket 协议）
 pub mod edge_tts;
+
+/// ElevenLabs 适配器：阶段 2c 音频，ElevenLabs TTS 文字转语音（高质量音色/多语种/克隆）
+pub mod elevenlabs;
+
+/// Cartesia 适配器：阶段 2c 音频，Cartesia Sonic TTS 文字转语音（低延迟流式）
+pub mod cartesia;
