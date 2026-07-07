@@ -2,7 +2,7 @@
 name = "aibridge-node"
 version.workspace = true
 edition.workspace = true
-rust-version.workspace = true
+rust-version = "1.77"
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -13,9 +13,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 aibridge-core.workspace = true
-napi = { version = "2", features = ["napi8", "tokio_rt"] }
+# napi: 启用 tokio_rt（async fn → Promise）+ napi8（ThreadsafeFunction 等）+ serde-json（serde_json::Value 互转）
+napi = { version = "2", features = ["napi8", "tokio_rt", "serde-json"] }
 napi-derive = "2"
 tokio.workspace = true
+futures.workspace = true
 serde_json.workspace = true
 
 [build-dependencies]

@@ -1,0 +1,38 @@
+{
+  "name": "aibridge",
+  "version": "2.0.0-alpha.1",
+  "description": "AIBridge Node.js 绑定（napi-rs，直连 aibridge-core，原生 Promise）",
+  "main": "lib.js",
+  "types": "index.d.ts",
+  "license": "MIT",
+  "author": "WingkySky <wingky@example.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WingkySky/aibridge",
+    "directory": "crates/aibridge-node"
+  },
+  "keywords": [
+    "aibridge",
+    "ai",
+    "napi-rs",
+    "llm",
+    "chat",
+    "tts"
+  ],
+  "engines": {
+    "node": ">= 16"
+  },
+  "napi": {
+    "name": "aibridge",
+    "triples": {}
+  },
+  "scripts": {
+    "build": "napi build --platform",
+    "build:debug": "napi build --platform -d",
+    "build:release": "napi build --platform --release",
+    "prepublishOnly": "napi prepublish -t npm"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.4"
+  }
+}
