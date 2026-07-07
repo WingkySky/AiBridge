@@ -17,8 +17,10 @@ name = "aibridge"
 aibridge-core.workspace = true
 tokio.workspace = true
 once_cell.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+futures.workspace = true
 
-# cbindgen 头文件生成（阶段 0.5 启用）
-# [build-dependencies]
-# cbindgen = "0.27"
+# cbindgen 头文件生成
+[build-dependencies]
+cbindgen = "0.29"

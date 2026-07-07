@@ -1,0 +1,29 @@
+# cbindgen 配置 - 生成 include/aibridge.h
+#
+# 设计文档 7 节：暴露 C ABI 供 Go/JVM/.NET 调用。
+# 头文件需含：opaque 句柄类型、aibridge_bytes_t、所有 #[no_mangle] extern "C" 函数、
+# 返回码常量。
+
+language = "C"
+
+# 头文件顶部注释
+header = """\
+/*
+ * AIBridge C ABI 头文件 - 由 cbindgen 自动生成，请勿手动修改
+ *
+ * 供 Go (CGO) / JVM (JNA) / .NET (P/Invoke) 调用 aibridge-ffi cdylib。
+ * Python / JS 通过 aibridge-python / aibridge-node 直连 aibridge-core，不走本头文件。
+ *
+ * 详见设计文档 docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md 第 7 节。
+ */
+"""
+
+# include guard
+include_guard = "AIBRIDGE_H"
+
+# 风格
+style = "type"
+sort_by = "Name"
+
+# 导出文档注释
+documentation = true
