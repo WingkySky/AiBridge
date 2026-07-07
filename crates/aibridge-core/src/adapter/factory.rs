@@ -16,7 +16,11 @@ use crate::adapters::aggregation_platforms::{
 };
 use crate::adapters::agnes::AgnesAdapter;
 use crate::adapters::azure::AzureAdapter;
+use crate::adapters::chinese::{
+    DoubaoAdapter, ErnieAdapter, KimiAdapter, MiniMaxAdapter, QwenAdapter, ZhipuAdapter,
+};
 use crate::adapters::echo::EchoAdapter;
+use crate::adapters::emerging_models::{IdeogramAdapter, LlamaAdapter, LumaAdapter};
 use crate::adapters::gemini::GeminiAdapter;
 use crate::adapters::more_models::{
     CohereAdapter, DeepSeekAdapter, MistralAdapter, PerplexityAdapter, StepFunAdapter,
@@ -52,13 +56,23 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "mistral",
     "cohere",
     "perplexity",
+    // 阶段 2a 第三批 emerging_models：
+    "ideogram",
+    "luma",
+    "llama",
+    // 阶段 2a 第三批 chinese：
+    "qwen",
+    "zhipu",
+    "doubao",
+    "ernie",
+    "kimi",
+    "minimax",
     // 阶段 2b/2c 待实现：
     "anthropic",
     "runway",
     "pika",
     "kling",
     "stability",
-    "chinese",
     "edge-tts",
     "elevenlabs",
     "cartesia",
@@ -102,13 +116,23 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         "mistral" => Ok(Box::new(MistralAdapter::new(config)?)),
         "cohere" => Ok(Box::new(CohereAdapter::new(config)?)),
         "perplexity" => Ok(Box::new(PerplexityAdapter::new(config)?)),
+        // 新兴模型：别名对齐 Python agn/adapters/emerging_models.py 末尾 register 调用
+        "ideogram" | "ideo" => Ok(Box::new(IdeogramAdapter::new(config)?)),
+        "luma" | "dream-machine" | "lumalabs" => Ok(Box::new(LumaAdapter::new(config)?)),
+        "llama" | "meta-llama" | "meta" => Ok(Box::new(LlamaAdapter::new(config)?)),
+        // 中文模型：别名对齐 Python agn/adapters/chinese.py 末尾 register 调用
+        // （qwen/zhipu/doubao/ernie/kimi/minimax 均无别名，直接注册主名）
+        "qwen" => Ok(Box::new(QwenAdapter::new(config)?)),
+        "zhipu" => Ok(Box::new(ZhipuAdapter::new(config)?)),
+        "doubao" => Ok(Box::new(DoubaoAdapter::new(config)?)),
+        "ernie" => Ok(Box::new(ErnieAdapter::new(config)?)),
+        "kimi" => Ok(Box::new(KimiAdapter::new(config)?)),
+        "minimax" => Ok(Box::new(MiniMaxAdapter::new(config)?)),
         // 阶段 2 适配器占位
-        "anthropic" | "runway" | "pika" | "kling" | "stability" | "chinese" | "edge-tts"
-        | "elevenlabs" | "cartesia" | "deepgram" | "assemblyai" => {
-            Err(AibridgeError::ProviderNotFound {
-                provider: format!("{provider}（阶段 2 待实现）"),
-            })
-        }
+        "anthropic" | "runway" | "pika" | "kling" | "stability" | "edge-tts" | "elevenlabs"
+        | "cartesia" | "deepgram" | "assemblyai" => Err(AibridgeError::ProviderNotFound {
+            provider: format!("{provider}（阶段 2 待实现）"),
+        }),
         // 未知 provider
         _ => Err(AibridgeError::provider_not_found(format!(
             "{provider}（未知 provider，支持：{}）",
@@ -302,6 +326,81 @@ mod tests {
     }
 
     #[test]
+    fn create_ideogram_returns_adapter() {
+        // 阶段 2a emerging_models：IdeogramAdapter 自带 DEFAULT_IDEOGRAM_BASE_URL 兜底，仅需 api_key
+        let adapter = create_adapter(config_for("ideogram")).expect("工厂应能创建 ideogram 适配器");
+        assert_eq!(adapter.provider_type(), "ideogram");
+    }
+
+    #[test]
+    fn create_luma_returns_adapter() {
+        let adapter = create_adapter(config_for("luma")).expect("工厂应能创建 luma 适配器");
+        assert_eq!(adapter.provider_type(), "luma");
+    }
+
+    #[test]
+    fn create_llama_returns_adapter() {
+        let adapter = create_adapter(config_for("llama")).expect("工厂应能创建 llama 适配器");
+        assert_eq!(adapter.provider_type(), "llama");
+    }
+
+    #[test]
+    fn create_emerging_models_aliases_map_to_main_provider_type() {
+        // 别名对齐 Python agn/adapters/emerging_models.py 末尾 register 调用：
+        // ideo -> ideogram / dream-machine & lumalabs -> luma / meta-llama & meta -> llama
+        let ideo = create_adapter(config_for("ideo")).expect("别名 ideo 应映射到 ideogram");
+        assert_eq!(ideo.provider_type(), "ideogram");
+        let dream_machine =
+            create_adapter(config_for("dream-machine")).expect("别名 dream-machine 应映射到 luma");
+        assert_eq!(dream_machine.provider_type(), "luma");
+        let lumalabs = create_adapter(config_for("lumalabs")).expect("别名 lumalabs 应映射到 luma");
+        assert_eq!(lumalabs.provider_type(), "luma");
+        let meta_llama =
+            create_adapter(config_for("meta-llama")).expect("别名 meta-llama 应映射到 llama");
+        assert_eq!(meta_llama.provider_type(), "llama");
+        let meta = create_adapter(config_for("meta")).expect("别名 meta 应映射到 llama");
+        assert_eq!(meta.provider_type(), "llama");
+    }
+
+    #[test]
+    fn create_qwen_returns_adapter() {
+        // 阶段 2a chinese：QwenAdapter 自带 DEFAULT_QWEN_BASE_URL 兜底，仅需 api_key
+        let adapter = create_adapter(config_for("qwen")).expect("工厂应能创建 qwen 适配器");
+        assert_eq!(adapter.provider_type(), "qwen");
+    }
+
+    #[test]
+    fn create_zhipu_returns_adapter() {
+        let adapter = create_adapter(config_for("zhipu")).expect("工厂应能创建 zhipu 适配器");
+        assert_eq!(adapter.provider_type(), "zhipu");
+    }
+
+    #[test]
+    fn create_doubao_returns_adapter() {
+        let adapter = create_adapter(config_for("doubao")).expect("工厂应能创建 doubao 适配器");
+        assert_eq!(adapter.provider_type(), "doubao");
+    }
+
+    #[test]
+    fn create_ernie_returns_adapter() {
+        // ErnieAdapter: api_key 不含 ':' 时直接作 access_token，构造无特殊要求
+        let adapter = create_adapter(config_for("ernie")).expect("工厂应能创建 ernie 适配器");
+        assert_eq!(adapter.provider_type(), "ernie");
+    }
+
+    #[test]
+    fn create_kimi_returns_adapter() {
+        let adapter = create_adapter(config_for("kimi")).expect("工厂应能创建 kimi 适配器");
+        assert_eq!(adapter.provider_type(), "kimi");
+    }
+
+    #[test]
+    fn create_minimax_returns_adapter() {
+        let adapter = create_adapter(config_for("minimax")).expect("工厂应能创建 minimax 适配器");
+        assert_eq!(adapter.provider_type(), "minimax");
+    }
+
+    #[test]
     fn create_additional_models_aliases_map_to_main_provider_type() {
         // 别名对齐 Python agn/adapters/additional_models.py 末尾 register 调用：
         // xaigrok -> grok / lingyiwanwu -> yi / shangtang -> sensenova / tencent_hunyuan -> hunyuan
@@ -357,6 +456,16 @@ mod tests {
         assert!(is_known_provider("mistral"));
         assert!(is_known_provider("cohere"));
         assert!(is_known_provider("perplexity"));
+        // 阶段 2a 第三批 emerging_models + chinese
+        assert!(is_known_provider("ideogram"));
+        assert!(is_known_provider("luma"));
+        assert!(is_known_provider("llama"));
+        assert!(is_known_provider("qwen"));
+        assert!(is_known_provider("zhipu"));
+        assert!(is_known_provider("doubao"));
+        assert!(is_known_provider("ernie"));
+        assert!(is_known_provider("kimi"));
+        assert!(is_known_provider("minimax"));
     }
 
     #[test]

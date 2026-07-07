@@ -39,3 +39,9 @@ pub mod additional_models;
 
 /// 更多模型适配器：阶段 2a，含 DeepSeek/StepFun/Mistral/Cohere/Perplexity 五个 OpenAI 兼容子适配器
 pub mod more_models;
+
+/// 新兴模型适配器：阶段 2a，含 Ideogram/Luma/Llama 三个子适配器
+pub mod emerging_models;
+
+/// 中文模型适配器：阶段 2a，含 Qwen/Zhipu/Doubao/Ernie/Kimi/MiniMax 六个 OpenAI 兼容子适配器
+pub mod chinese;
