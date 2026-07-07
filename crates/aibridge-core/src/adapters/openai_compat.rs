@@ -165,6 +165,30 @@ impl OpenAiCompatAdapter {
         &self.capabilities
     }
 
+    /// 内部 reqwest::Client 引用（供子适配器独立实现非标准端点时复用 HTTP 客户端）
+    ///
+    /// 对子适配器开放（pub）：Cohere 等非标准协议适配器需直接用 reqwest::Client
+    /// 构造非标准请求（如 POST /chat + 自定义 body），复用本结构的连接池与超时配置。
+    pub fn http_inner(&self) -> &reqwest::Client {
+        self.http.inner()
+    }
+
+    /// 校验请求的能力是否被支持（对子适配器开放的 pub 版本）
+    ///
+    /// 私有 `ensure_capability` 的 pub 包装，供 DeepSeek/Cohere 等子适配器在
+    /// 重写 chat 等方法时复用能力校验逻辑。
+    pub fn ensure_capability_pub(&self, cap: Capabilities) -> Result<()> {
+        self.ensure_capability(cap)
+    }
+
+    /// 发送 chat/completions 请求（对子适配器开放）
+    ///
+    /// 私有 `post_authed_json("chat/completions", body)` 的 pub 包装，
+    /// 供 DeepSeek 等子适配器在自定义请求体后复用发送 + 错误映射逻辑。
+    pub async fn post_chat(&self, body: &Value) -> Result<Value> {
+        self.post_authed_json("chat/completions", body).await
+    }
+
     /// 拼接完整 URL（base_url + 相对路径）
     fn url(&self, path: &str) -> String {
         let base = self.base_url.trim_end_matches('/');
