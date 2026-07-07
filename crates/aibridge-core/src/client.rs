@@ -48,8 +48,10 @@ impl Client {
 
         // 校验：requires_api_key 时必须有 api_key
         // 阶段 0.4 无法预知适配器的 requires_api_key（适配器未实现），
-        // 暂按"有则需 key"的保守策略：未知 provider 也要求 key
-        config.validate(true)?;
+        // 暂按"有则需 key"的保守策略：未知 provider 也要求 key。
+        // 例外：免认证 provider（如 echo mock 适配器）跳过 key 校验，便于管线验证
+        let requires_api_key = !Self::is_free_provider(provider);
+        config.validate(requires_api_key)?;
 
         let adapter = create_adapter(config.clone()).map_err(|e| match e {
             AibridgeError::ProviderNotFound { provider: p } => {
@@ -62,6 +64,14 @@ impl Client {
             provider_type: provider.to_string(),
             adapter,
         })
+    }
+
+    /// 判断 provider 是否为免认证（不需要 API Key）
+    ///
+    /// 阶段 0.6：`echo` 为 mock 适配器，免认证便于五语言管线验证。
+    /// 阶段 2c 起将补充 edge-tts 等真实免认证 provider。
+    fn is_free_provider(provider: &str) -> bool {
+        matches!(provider, "echo")
     }
 
     /// 启动客户端（初始化适配器）
@@ -143,6 +153,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::chat::{ChatMessage, ChatRequest};
     use std::env;
     use std::sync::Mutex;
 
@@ -190,5 +201,26 @@ mod tests {
             Err(AibridgeError::ProviderNotFound { .. })
         ));
         env::remove_var("AIBRIDGE_ENVTEST_API_KEY");
+    }
+
+    #[test]
+    fn new_echo_without_api_key_succeeds() {
+        // echo 免认证：无 api_key 也能创建客户端
+        let result = Client::new("echo", ClientOptions::default());
+        assert!(result.is_ok(), "echo 应免认证创建客户端");
+    }
+
+    #[tokio::test]
+    async fn echo_client_chat_roundtrip() {
+        // 端到端验证：Client → EchoAdapter → chat 回显
+        let mut client = Client::new("echo", ClientOptions::default()).unwrap();
+        client.start().await.unwrap();
+        let req = ChatRequest::builder("echo-chat", vec![ChatMessage::user("hello")]).build();
+        let resp = client.chat(req).await.unwrap();
+        assert_eq!(
+            resp.choices[0].message.content.as_deref(),
+            Some("hello [echo]")
+        );
+        client.close().await.unwrap();
     }
 }

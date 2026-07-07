@@ -8,13 +8,16 @@
 //! - 阶段 0.4 暂只占位分支（返 ProviderNotFound），具体适配器阶段 1 起填充
 
 use crate::adapter::Adapter;
+use crate::adapters::echo::EchoAdapter;
 use crate::config::ProviderConfig;
 use crate::error::{AibridgeError, Result};
 
 /// 已支持的 provider 列表（用于错误信息与测试）
 ///
 /// 阶段 1 起逐步填充实际支持的 provider 名。
+/// `echo` 为阶段 0.6 管线验证用的 mock 适配器，常驻可用。
 pub const KNOWN_PROVIDERS: &[&str] = &[
+    "echo",
     "openai",
     "agnes",
     "volcengine_cv",
@@ -38,10 +41,13 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
 /// 根据配置创建适配器实例
 ///
 /// 对应 Python v1 `AdapterFactory.create`。
-/// 阶段 0.4：所有分支均为占位（返 ProviderNotFound），具体适配器在阶段 1 起填充。
+/// `echo` 为阶段 0.6 管线验证用 mock 适配器，已实现；
+/// 其余 provider 阶段 0.4 占位（返 ProviderNotFound），阶段 1 起填充。
 pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
     let provider = config.provider_type.as_str();
     match provider {
+        // Echo（Mock）适配器：阶段 0.6 管线验证用，已实现
+        "echo" => Ok(Box::new(EchoAdapter::new())),
         // 阶段 1 MVP 适配器（阶段 1.0 起填充实际构造逻辑）
         "openai" | "agnes" | "volcengine_cv" | "gemini" => {
             // TODO(阶段 1): 引入 adapters::openai::OpenAiAdapter 等具体实现
@@ -148,6 +154,7 @@ mod tests {
 
     #[test]
     fn is_known_provider_recognizes_known() {
+        assert!(is_known_provider("echo"));
         assert!(is_known_provider("openai"));
         assert!(is_known_provider("edge-tts"));
         assert!(is_known_provider("assemblyai"));
@@ -166,5 +173,17 @@ mod tests {
         } else {
             panic!("应为 ProviderNotFound");
         }
+    }
+
+    #[test]
+    fn create_echo_returns_adapter() {
+        // echo 免认证，无需 api_key
+        let config = ProviderConfig::from_options("echo", ClientOptions::default());
+        let result = create_adapter(config);
+        assert!(result.is_ok(), "工厂应能创建 echo 适配器");
+        let adapter = result.unwrap();
+        assert_eq!(adapter.provider_type(), "echo");
+        assert_eq!(adapter.provider_name(), "Echo (Mock)");
+        assert!(!adapter.requires_api_key());
     }
 }

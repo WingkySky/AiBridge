@@ -9,3 +9,6 @@
 //! - 阶段 2c（音频）：edge-tts / elevenlabs / cartesia / deepgram / assemblyai
 //!
 //! 各适配器实现 `adapter::Adapter` trait，由 `adapter::create_adapter` 工厂分发。
+
+/// Echo（Mock）适配器：阶段 0.6 五语言管线验证用，不调网络返固定/回显响应
+pub mod echo;
