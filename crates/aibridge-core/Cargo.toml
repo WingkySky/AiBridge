@@ -24,6 +24,11 @@ bytes.workspace = true
 base64 = "0.22"
 # 随机数（router.rs 的 round_robin/random/weighted 策略用）
 rand = "0.8"
+# Edge TTS WebSocket 协议（阶段2c edge-tts 适配器用）
+tokio-tungstenite = { version = "0.21", features = ["connect", "rustls-tls-webpki-roots"] }
+# HMAC-SHA256（Edge TTS 的 Sec-MS-GEC token 计算）
+hmac = "0.12"
+sha2 = "0.10"
 
 [dev-dependencies]
 # HTTP mock，用于适配器单测（openai_compat 等）
