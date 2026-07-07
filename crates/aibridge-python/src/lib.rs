@@ -10,9 +10,12 @@
 //!   tokio 上执行，PyO3 协程通过 await JoinHandle 拿结果。echo adapter 无网络也走
 //!   同一路径，保持一致。
 //! - `PyClient` 持有 `Arc<tokio::sync::Mutex<Client>>`，支持 `start`/`close` 可变操作。
-//! - 流式：`chat_stream` 把 core `ChatStream` 通过 `tokio::sync::Mutex` 封装进
-//!   `ChatStreamIterator`，`__anext__` 同步返回 awaitable（PyO3 0.28 slot 不支持
-//!   async fn），awaitable 内抛 `StopIteration(chunk)`/`StopAsyncIteration`。
+//! - 流式：`chat_stream` 把 core `ChatStream`（`BoxStream`）通过 `tokio::sync::Mutex`
+//!   封装进 `ChatStreamIterator`。`__anext__` 返回 PyO3 内置的
+//!   [`pyo3::coroutine::Coroutine`]，其包裹的 Rust future 在 tokio runtime 上
+//!   `spawn` 消费 stream（真实 IO 在 tokio worker 线程，不阻塞 asyncio 事件循环）。
+//!   `Coroutine` 的 waker 通过 `asyncio.Future` + `call_soon_threadsafe` 把
+//!   "chunk 就绪"通知回 asyncio 事件循环，await 期间让出线程给其他协程。
 
 // PyO3 0.28 的 `#[pymethods]` 宏展开会用到 Rust 1.77+ 稳定的语法（如 let 链），
 // 与 workspace MSRV 1.75 冲突。该 lint 针对宏生成代码，非手写代码，故整体允许。
@@ -22,7 +25,8 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::coroutine::Coroutine;
+use pyo3::types::{PyBytes, PyString};
 use tokio::sync::Mutex;
 
 use aibridge_core::adapter::ChatStream as CoreChatStream;
@@ -524,11 +528,19 @@ impl SpeechResult {
 /// `async for chunk in stream:` 每次取一个 `ChatCompletionChunk`，流结束抛
 /// `StopAsyncIteration`。
 ///
-/// 实现说明（PyO3 0.28 限制）：
-/// `__anext__` slot 不支持 `async fn`，故采用"同步 `__anext__` 返回 awaitable"
-/// 模式。`__anext__` 在全局 tokio runtime 上 `block_on` 取下一个 chunk（echo
-/// adapter 纯计算瞬时完成；真实 adapter 阶段将改为 asyncio.Future 桥接避免
-/// 阻塞事件循环），把结果封装进 [`NextAwaitable`] 返回。
+/// 实现说明（不阻塞 asyncio 事件循环）：
+/// `__anext__` 同步返回一个 PyO3 内置的 [`Coroutine`]（可 `await` 的 Python 对象），
+/// 其包裹的 Rust future 在全局 tokio runtime 上 `spawn` 消费 core `ChatStream`：
+/// - 真实 adapter 的 reqwest IO 在 tokio worker 线程执行，asyncio 线程仅 await
+///   `JoinHandle`（Pending 时让出，不阻塞事件循环，其他协程可运行）。
+/// - chunk 就绪后，`Coroutine` 的 `AsyncioWaker` 通过 `asyncio.Future` +
+///   `call_soon_threadsafe` 把就绪通知调度回 asyncio 事件循环（PyO3 内置实现，
+///   无需手写 loop 引用），`await` 返回 chunk。
+/// - 流结束：future 返回 `Err(StopAsyncIteration)`；取 chunk 出错：返回对应
+///   `AibridgeError` 子类；正常 chunk：`Ok(chunk)` → `StopIteration(chunk)`。
+///
+/// GIL 处理：future 在 tokio 上 await stream 期间不持 GIL（`spawn` 的 task 在
+/// tokio worker 跑），仅在拿到 chunk 后 `Python::with_gil` 构造 Python 对象。
 #[pyclass]
 struct ChatStreamIterator {
     /// core 流（None 表示已耗尽）
@@ -542,73 +554,66 @@ impl ChatStreamIterator {
         slf
     }
 
-    /// 取下一个 chunk（同步返回 awaitable）
+    /// 取下一个 chunk（同步返回 `Coroutine`，可 `await`）
     ///
-    /// 返回一个 [`NextAwaitable`]，`await` 后得到 `ChatCompletionChunk` 或抛
-    /// `StopAsyncIteration`（流结束）。
-    fn __anext__(&self, py: Python<'_>) -> PyResult<Py<NextAwaitable>> {
+    /// 返回的 `Coroutine` `await` 后得到 `ChatCompletionChunk`，或抛
+    /// `StopAsyncIteration`（流结束）/ 对应 `AibridgeError` 子类（取 chunk 出错）。
+    ///
+    /// 不阻塞事件循环：实际取 chunk 的 future 在 tokio runtime 上推进，
+    /// `Coroutine` 的 waker 负责把就绪通知桥接回 asyncio 事件循环。
+    fn __anext__(&self, py: Python<'_>) -> PyResult<Py<Coroutine>> {
         let inner = self.inner.clone();
-        // 在全局 tokio runtime 上同步取下一个 chunk。
-        // echo adapter 无 IO，瞬时完成；block_on 在当前线程仅等待 JoinHandle，
-        // 实际 stream.next() 在 tokio worker 线程执行，不会死锁。
-        // py.detach 释放 GIL 期间阻塞，避免长时间持锁。
-        let item: Option<Result<CoreChatCompletionChunk, CoreAibridgeError>> =
-            py.detach(|| RUNTIME.block_on(async move {
-                let mut guard = inner.lock().await;
-                match guard.as_mut() {
-                    None => None,
-                    Some(stream) => stream.next().await,
-                }
-            }));
 
-        let chunk = match item {
-            None => None,
-            Some(Ok(c)) => Some(Ok(Py::new(py, ChatCompletionChunk::from_core(c))?)),
-            Some(Err(e)) => Some(Err(map_error(e))),
+        // 构造包裹"取下一个 chunk"逻辑的 future。该 future 在 Coroutine 被
+        // poll 时推进（poll 发生在 asyncio 线程，持 GIL），但其内部把 stream
+        // 消费 spawn 到 tokio runtime，await JoinHandle 期间 Pending 让出线程。
+        let fut = async move {
+            // 在 tokio runtime 上消费 stream。spawn 后 await JoinHandle：
+            // - stream.next()（含真实 reqwest IO）在 tokio worker 线程执行
+            // - asyncio 线程仅 poll JoinHandle，Pending 时注册 waker 让出
+            let join_result = RUNTIME
+                .spawn(async move {
+                    let mut guard = inner.lock().await;
+                    match guard.as_mut() {
+                        None => None,
+                        Some(stream) => stream.next().await,
+                    }
+                })
+                .await;
+
+            // JoinError（task panic/取消）→ RuntimeError
+            let item: Option<Result<CoreChatCompletionChunk, CoreAibridgeError>> = join_result
+                .map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "chat_stream 消费任务失败: {e}"
+                    ))
+                })?;
+
+            // 在 tokio worker 线程拿到 item，需重新进入 GIL 上下文构造 Python 对象。
+            // Coroutine future 被 poll 时所在线程（asyncio 线程）已 attached GIL，
+            // `Python::attach` 在已 attached 线程上直接复用（返回 R），安全构造 pyclass。
+            Python::attach(|py: Python<'_>| -> PyResult<Py<PyAny>> {
+                match item {
+                    // 流结束 → 抛 StopAsyncIteration（await 时终止 async for）
+                    None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
+                    // 正常 chunk → 返回 chunk 对象（Coroutine 抛 StopIteration(chunk)）
+                    Some(Ok(c)) => {
+                        let chunk = Py::new(py, ChatCompletionChunk::from_core(c))?;
+                        Ok(chunk.into_any())
+                    }
+                    // 取 chunk 出错 → 抛对应 AibridgeError 子类
+                    Some(Err(e)) => Err(map_error(e)),
+                }
+            })
         };
 
-        Py::new(py, NextAwaitable { chunk })
-    }
-}
-
-/// `__anext__` 返回的 awaitable
-///
-/// 实现 `__await__`/`__iter__`/`__next__` 协议：`await` 时 `__next__` 抛
-/// `StopIteration(chunk)` 返回 chunk，或 `StopAsyncIteration` 表示流结束。
-///
-/// 结果在构造时预计算（由 `__anext__` 的 block_on 完成）。
-#[pyclass]
-struct NextAwaitable {
-    /// 预计算的下一个 chunk（None 表示流已结束）
-    chunk: Option<PyResult<Py<ChatCompletionChunk>>>,
-}
-
-#[pymethods]
-impl NextAwaitable {
-    /// `__await__` 返回 self（awaitable 协议）
-    fn __await__(slf: Py<Self>) -> Py<Self> {
-        slf
-    }
-
-    /// `__iter__` 返回 self（awaitable 兼容迭代器协议）
-    fn __iter__(slf: Py<Self>) -> Py<Self> {
-        slf
-    }
-
-    /// `__next__` 抛出结果
-    ///
-    /// - 有 chunk：抛 `StopIteration(chunk)`，`await` 得到 chunk
-    /// - 流结束：抛 `StopAsyncIteration`
-    /// - 取 chunk 出错：抛对应 AibridgeError 子类
-    fn __next__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        match &self.chunk {
-            None => Err(pyo3::exceptions::PyStopAsyncIteration::new_err(())),
-            Some(Ok(chunk)) => {
-                // StopIteration(chunk) → await 得到 chunk
-                Err(pyo3::exceptions::PyStopIteration::new_err((chunk.clone_ref(py),)))
-            }
-            Some(Err(e)) => Err(e.clone_ref(py)),
-        }
+        // 用 PyO3 内置 Coroutine 包装 future。Coroutine 实现 __await__/__next__/send，
+        // 可直接被 `await`。其 waker 自动桥接 tokio 唤醒 → asyncio.Future.set_result
+        // （通过 call_soon_threadsafe），无需手写 asyncio loop 引用。
+        let name = PyString::new(py, "ChatStreamIterator.__anext__");
+        let coroutine =
+            pyo3::impl_::coroutine::new_coroutine(&name, Some("ChatStreamIterator"), None, fut);
+        Py::new(py, coroutine)
     }
 }
 
@@ -893,7 +898,6 @@ fn _aibridge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 客户端与流式
     m.add_class::<Client>()?;
     m.add_class::<ChatStreamIterator>()?;
-    m.add_class::<NextAwaitable>()?;
 
     // 模块版本
     m.add("__version__", aibridge_core::VERSION)?;
