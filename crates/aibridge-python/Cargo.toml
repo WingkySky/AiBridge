@@ -14,7 +14,17 @@ name = "aibridge"
 
 [dependencies]
 aibridge-core.workspace = true
-# PyO3 0.22+ 原生支持 async fn，不再需要 pyo3-asyncio
-pyo3 = { version = "0.28", features = ["extension-module", "abi3-py310"] }
-tokio.workspace = true
+# PyO3 0.28 原生支持 async fn（需 experimental-async feature），不再需要 pyo3-asyncio。
+#
+# `extension-module` feature 不在此处启用：它会让 `cargo build` 因不链接 Python
+# 动态库而失败（扩展模块符号由 Python 进程运行时提供）。改由 pyproject.toml 的
+# `[tool.maturin] features = ["pyo3/extension-module"]` 在 maturin 构建时启用，
+# 这样 `cargo build -p aibridge-python` 能正常链接 Python 框架，maturin 产物正确。
+pyo3 = { version = "0.28", features = [
+    "abi3-py310",
+    "experimental-async",
+] }
+tokio = { workspace = true, features = ["rt-multi-thread", "rt", "sync"] }
+futures.workspace = true
 serde_json.workspace = true
+once_cell.workspace = true
