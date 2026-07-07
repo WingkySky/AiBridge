@@ -50,4 +50,20 @@
           Link="aibridge.dll" />
   </ItemGroup>
 
+  <!--
+    NuGet 打包配置（设计文档 12.1）：动态库放进 runtimes/{rid}/native/，
+    .NET 运行时 NativeLibrary 自动按 RID 加载。脚本 build-dotnet.sh 负责把
+    libaibridge 拷到 runtimes/{rid}/native/，这里仅声明打包规则（通配包含）。
+  -->
+  <PropertyGroup>
+    <PackageId>AIBridge</PackageId>
+    <IsPackable>true</IsPackable>
+    <PackageVersion>2.0.0-alpha.1</PackageVersion>
+    <Description>AIBridge .NET 绑定（P/Invoke，直连 aibridge-ffi）</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes\" />
+  </ItemGroup>
+
 </Project>

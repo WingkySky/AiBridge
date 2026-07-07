@@ -61,3 +61,58 @@ tasks.withType<JavaExec> {
 tasks.test {
     useJUnitPlatform()
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// 动态库打进 jar（发布分发，设计文档 12.1）
+//
+// copyNativeLib：把 target/release 的 libaibridge 拷到 build/resources/main/{os}/{arch}/
+// （JNA classpath 约定路径，运行时 Native.load 自动从 jar 内加载）。
+// 由 -PembedNative=true 触发（CI/发布用）；本地 ./gradlew run 仍走 java.library.path。
+// jar task 按平台加 classifier（如 darwin-aarch64），便于多平台并行发布。
+// ──────────────────────────────────────────────────────────────────────────
+
+// 计算 native 库的 OS/arch 标识（JNA 约定：darwin/linux/win32 × x86_64/aarch64）
+val nativeOs: String = when {
+    System.getProperty("os.name").lowercase().contains("mac") -> "darwin"
+    System.getProperty("os.name").lowercase().contains("linux") -> "linux"
+    System.getProperty("os.name").lowercase().contains("windows") -> "win32"
+    else -> "unknown"
+}
+val nativeArch: String = when (System.getProperty("os.arch").lowercase()) {
+    "aarch64", "arm64" -> "aarch64"
+    "x86_64", "amd64" -> "x86_64"
+    else -> System.getProperty("os.arch")
+}
+
+// 动态库文件名（按平台）
+val nativeLibName: String = when (nativeOs) {
+    "darwin" -> "libaibridge.dylib"
+    "linux" -> "libaibridge.so"
+    "win32" -> "aibridge.dll"
+    else -> "libaibridge.unknown"
+}
+
+// release 动态库目录（cargo build -p aibridge-ffi --release 产物）
+val ffiReleaseDir = file("${rootProject.projectDir}/../../target/release")
+
+// 拷贝 libaibridge 进 jar resources（JNA classpath 约定路径 {os}/{arch}/）
+tasks.register<Copy>("copyNativeLib") {
+    description = "把 libaibridge 拷进 build/resources/main/{os}/{arch}/（打进 jar）"
+    group = "build"
+    from(ffiReleaseDir) {
+        include(nativeLibName)
+    }
+    into(layout.buildDirectory.dir("resources/main/$nativeOs/$nativeArch"))
+    // 仅 -PembedNative=true 且 release 产物存在时执行（避免本地构建因无产物报错）
+    onlyIf {
+        project.hasProperty("embedNative") && file("${ffiReleaseDir}/$nativeLibName").exists()
+    }
+}
+
+// jar 依赖 copyNativeLib（确保 native 打进 jar），发布时按平台加 classifier
+tasks.jar {
+    dependsOn("copyNativeLib")
+    if (project.hasProperty("embedNative")) {
+        archiveClassifier.set("$nativeOs-$nativeArch")
+    }
+}
