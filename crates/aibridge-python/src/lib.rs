@@ -26,7 +26,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use pyo3::coroutine::Coroutine;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyString};
+use pyo3::types::{PyBool, PyBytes, PyDict, PyList, PyString, PyTuple};
 use tokio::sync::Mutex;
 
 use aibridge_core::adapter::ChatStream as CoreChatStream;
@@ -35,10 +35,28 @@ use aibridge_core::config::ClientOptions as CoreClientOptions;
 use aibridge_core::error::AibridgeError as CoreAibridgeError;
 use aibridge_core::model::audio::{
     SpeechRequest as CoreSpeechRequest, SpeechResult as CoreSpeechResult,
+    TranscribeRequest as CoreTranscribeRequest, TranscriptionResult as CoreTranscriptionResult,
+    TranscriptionSegment as CoreTranscriptionSegment, TranscriptionWord as CoreTranscriptionWord,
 };
 use aibridge_core::model::chat::{
     ChatCompletion as CoreChatCompletion, ChatCompletionChunk as CoreChatCompletionChunk,
     ChatMessage as CoreChatMessage, ChatRequest as CoreChatRequest,
+};
+use aibridge_core::model::common::{
+    ModelInfo as CoreModelInfo, ModelType as CoreModelType, TaskStatus as CoreTaskStatus,
+    VideoMode as CoreVideoMode, VoiceInfo as CoreVoiceInfo,
+};
+use aibridge_core::model::image::{
+    FileInput as CoreFileInput, ImageData as CoreImageData, ImageRequest as CoreImageRequest,
+    ImageResult as CoreImageResult,
+};
+use aibridge_core::model::options::{
+    EmbedInput as CoreEmbedInput, EmbedRequest as CoreEmbedRequest,
+    EmbeddingItem as CoreEmbeddingItem, EmbeddingResult as CoreEmbeddingResult,
+    EmbeddingVector as CoreEmbeddingVector,
+};
+use aibridge_core::model::video::{
+    VideoRequest as CoreVideoRequest, VideoStatus as CoreVideoStatus, VideoTask as CoreVideoTask,
 };
 
 // ===========================================================================
@@ -148,6 +166,129 @@ fn map_error(err: CoreAibridgeError) -> PyErr {
         CoreAibridgeError::ProviderNotFound { .. } => ProviderNotFoundError::new_err(message),
         CoreAibridgeError::VoiceNotAvailable { .. } => VoiceNotAvailableError::new_err(message),
         CoreAibridgeError::ServiceUnavailable { .. } => ServiceUnavailableError::new_err(message),
+    }
+}
+
+// ===========================================================================
+// Python ↔ core 转换辅助
+// ===========================================================================
+
+/// 将 Python `**kwargs` 字典转换为 core `extra` 透传参数表
+///
+/// 用于 image_generate / video_create / transcribe / embed 等方法的厂商特有参数透传。
+/// 每个值经 [`py_to_json`] 转为 `serde_json::Value`。
+fn kwargs_to_extra(
+    d: &Bound<'_, PyDict>,
+) -> PyResult<std::collections::HashMap<String, serde_json::Value>> {
+    let mut map = std::collections::HashMap::new();
+    for (k, v) in d.iter() {
+        let key = k.extract::<String>()?;
+        map.insert(key, py_to_json(&v)?);
+    }
+    Ok(map)
+}
+
+/// 将任意 Python 对象转换为 `serde_json::Value`
+///
+/// 支持 None/bool/int/float/str/list/tuple/dict，其余类型兜底为字符串表示。
+/// bool 必须先于 int 判断（Python 中 bool 是 int 子类，`extract::<i64>` 对 True 返 Ok）。
+fn py_to_json(obj: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    if obj.is_none() {
+        return Ok(serde_json::Value::Null);
+    }
+    // bool 先于 int 判断
+    if obj.cast::<PyBool>().is_ok() {
+        let b: bool = obj.extract()?;
+        return Ok(serde_json::Value::Bool(b));
+    }
+    if let Ok(i) = obj.extract::<i64>() {
+        return Ok(serde_json::json!(i));
+    }
+    if let Ok(u) = obj.extract::<u64>() {
+        return Ok(serde_json::json!(u));
+    }
+    if let Ok(f) = obj.extract::<f64>() {
+        return Ok(serde_json::json!(f));
+    }
+    if let Ok(s) = obj.extract::<String>() {
+        return Ok(serde_json::Value::String(s));
+    }
+    if let Ok(d) = obj.cast::<PyDict>() {
+        let mut map = serde_json::Map::new();
+        for (k, v) in d.iter() {
+            map.insert(k.extract::<String>()?, py_to_json(&v)?);
+        }
+        return Ok(serde_json::Value::Object(map));
+    }
+    if let Ok(l) = obj.cast::<PyList>() {
+        let mut arr = Vec::new();
+        for item in l.iter() {
+            arr.push(py_to_json(&item)?);
+        }
+        return Ok(serde_json::Value::Array(arr));
+    }
+    if let Ok(t) = obj.cast::<PyTuple>() {
+        let mut arr = Vec::new();
+        for item in t.iter() {
+            arr.push(py_to_json(&item)?);
+        }
+        return Ok(serde_json::Value::Array(arr));
+    }
+    // 兜底：字符串表示
+    Ok(serde_json::Value::String(obj.str()?.to_string()))
+}
+
+/// 将 Python 文件参数（str/bytes）转换为 core `FileInput`
+///
+/// - str 以 http(s):// 开头 → `FileInput::Url`
+/// - 其他 str → `FileInput::Path`
+/// - bytes → `FileInput::Bytes`
+fn py_to_file_input(obj: &Bound<'_, PyAny>) -> PyResult<CoreFileInput> {
+    if let Ok(s) = obj.extract::<String>() {
+        if s.starts_with("http://") || s.starts_with("https://") {
+            Ok(CoreFileInput::url(s))
+        } else {
+            Ok(CoreFileInput::path(s))
+        }
+    } else if let Ok(b) = obj.extract::<Vec<u8>>() {
+        Ok(CoreFileInput::bytes(b))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "文件参数必须是 str（路径/URL）或 bytes",
+        ))
+    }
+}
+
+/// 将 Python embed 输入（str 或 list[str]）转换为 core `EmbedInput`
+fn py_to_embed_input(obj: &Bound<'_, PyAny>) -> PyResult<CoreEmbedInput> {
+    if let Ok(s) = obj.extract::<String>() {
+        Ok(CoreEmbedInput::Single(s))
+    } else if let Ok(v) = obj.extract::<Vec<String>>() {
+        Ok(CoreEmbedInput::Multiple(v))
+    } else {
+        Err(pyo3::exceptions::PyTypeError::new_err(
+            "input 必须是 str 或 list[str]",
+        ))
+    }
+}
+
+/// 将视频生成模式字符串转换为 core `VideoMode`
+fn parse_video_mode(s: &str) -> CoreVideoMode {
+    match s.to_lowercase().as_str() {
+        "image2video" => CoreVideoMode::Image2Video,
+        "keyframes" => CoreVideoMode::Keyframes,
+        "multiimage" => CoreVideoMode::Multiimage,
+        _ => CoreVideoMode::Text2Video,
+    }
+}
+
+/// 将 core `TaskStatus` 转为字符串（Python 侧用字符串表示任务状态）
+fn task_status_to_str(s: CoreTaskStatus) -> &'static str {
+    match s {
+        CoreTaskStatus::Pending => "pending",
+        CoreTaskStatus::Processing => "processing",
+        CoreTaskStatus::Success => "success",
+        CoreTaskStatus::Failed => "failed",
     }
 }
 
@@ -506,6 +647,668 @@ impl SpeechResult {
     }
 }
 
+/// 图像数据（`ImageResult.data` 元素）
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct ImageData {
+    url: Option<String>,
+    b64_json: Option<String>,
+    revised_prompt: Option<String>,
+}
+
+#[pymethods]
+impl ImageData {
+    #[getter]
+    fn url(&self) -> Option<String> {
+        self.url.clone()
+    }
+
+    #[getter]
+    fn b64_json(&self) -> Option<String> {
+        self.b64_json.clone()
+    }
+
+    #[getter]
+    fn revised_prompt(&self) -> Option<String> {
+        self.revised_prompt.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ImageData(url={:?}, has_b64={})",
+            self.url,
+            self.b64_json.is_some()
+        )
+    }
+}
+
+impl ImageData {
+    fn from_core(d: CoreImageData) -> Self {
+        Self {
+            url: d.url,
+            b64_json: d.b64_json,
+            revised_prompt: d.revised_prompt,
+        }
+    }
+}
+
+/// 图像生成结果
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct ImageResult {
+    id: String,
+    created: u64,
+    model: String,
+    data: Vec<ImageData>,
+}
+
+#[pymethods]
+impl ImageResult {
+    #[getter]
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    #[getter]
+    fn created(&self) -> u64 {
+        self.created
+    }
+
+    #[getter]
+    fn model(&self) -> String {
+        self.model.clone()
+    }
+
+    #[getter]
+    fn data(&self) -> Vec<ImageData> {
+        self.data.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ImageResult(id={:?}, model={:?}, data_len={})",
+            self.id,
+            self.model,
+            self.data.len()
+        )
+    }
+}
+
+impl ImageResult {
+    fn from_core(r: CoreImageResult) -> Self {
+        Self {
+            id: r.id,
+            created: r.created,
+            model: r.model,
+            data: r.data.into_iter().map(ImageData::from_core).collect(),
+        }
+    }
+}
+
+/// 视频任务（创建后返回）
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct VideoTask {
+    task_id: String,
+    model: String,
+    status: String,
+    created_at: u64,
+}
+
+#[pymethods]
+impl VideoTask {
+    #[getter]
+    fn task_id(&self) -> String {
+        self.task_id.clone()
+    }
+
+    #[getter]
+    fn model(&self) -> String {
+        self.model.clone()
+    }
+
+    #[getter]
+    fn status(&self) -> String {
+        self.status.clone()
+    }
+
+    #[getter]
+    fn created_at(&self) -> u64 {
+        self.created_at
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VideoTask(task_id={:?}, status={:?})",
+            self.task_id, self.status
+        )
+    }
+}
+
+impl VideoTask {
+    fn from_core(t: CoreVideoTask) -> Self {
+        Self {
+            task_id: t.task_id,
+            model: t.model,
+            status: task_status_to_str(t.status).to_string(),
+            created_at: t.created_at,
+        }
+    }
+}
+
+/// 视频任务状态（轮询返回）
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct VideoStatus {
+    task_id: String,
+    status: String,
+    video_url: Option<String>,
+    progress: Option<u32>,
+    error: Option<String>,
+    created_at: Option<u64>,
+    updated_at: Option<u64>,
+}
+
+#[pymethods]
+impl VideoStatus {
+    #[getter]
+    fn task_id(&self) -> String {
+        self.task_id.clone()
+    }
+
+    #[getter]
+    fn status(&self) -> String {
+        self.status.clone()
+    }
+
+    #[getter]
+    fn video_url(&self) -> Option<String> {
+        self.video_url.clone()
+    }
+
+    #[getter]
+    fn progress(&self) -> Option<u32> {
+        self.progress
+    }
+
+    #[getter]
+    fn error(&self) -> Option<String> {
+        self.error.clone()
+    }
+
+    #[getter]
+    fn created_at(&self) -> Option<u64> {
+        self.created_at
+    }
+
+    #[getter]
+    fn updated_at(&self) -> Option<u64> {
+        self.updated_at
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VideoStatus(task_id={:?}, status={:?}, progress={:?})",
+            self.task_id, self.status, self.progress
+        )
+    }
+}
+
+impl VideoStatus {
+    fn from_core(s: CoreVideoStatus) -> Self {
+        Self {
+            task_id: s.task_id,
+            status: task_status_to_str(s.status).to_string(),
+            video_url: s.video_url,
+            progress: s.progress,
+            error: s.error,
+            created_at: s.created_at,
+            updated_at: s.updated_at,
+        }
+    }
+}
+
+/// 转写词级时间戳
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct TranscriptionWord {
+    word: String,
+    start: f64,
+    end: f64,
+    confidence: Option<f64>,
+}
+
+#[pymethods]
+impl TranscriptionWord {
+    #[getter]
+    fn word(&self) -> String {
+        self.word.clone()
+    }
+
+    #[getter]
+    fn start(&self) -> f64 {
+        self.start
+    }
+
+    #[getter]
+    fn end(&self) -> f64 {
+        self.end
+    }
+
+    #[getter]
+    fn confidence(&self) -> Option<f64> {
+        self.confidence
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TranscriptionWord(word={:?}, start={}, end={})",
+            self.word, self.start, self.end
+        )
+    }
+}
+
+impl TranscriptionWord {
+    fn from_core(w: CoreTranscriptionWord) -> Self {
+        Self {
+            word: w.word,
+            start: w.start,
+            end: w.end,
+            confidence: w.confidence,
+        }
+    }
+}
+
+/// 转写分段（带时间戳）
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct TranscriptionSegment {
+    id: u32,
+    start: f64,
+    end: f64,
+    text: String,
+    confidence: Option<f64>,
+    speaker: Option<String>,
+}
+
+#[pymethods]
+impl TranscriptionSegment {
+    #[getter]
+    fn id(&self) -> u32 {
+        self.id
+    }
+
+    #[getter]
+    fn start(&self) -> f64 {
+        self.start
+    }
+
+    #[getter]
+    fn end(&self) -> f64 {
+        self.end
+    }
+
+    #[getter]
+    fn text(&self) -> String {
+        self.text.clone()
+    }
+
+    #[getter]
+    fn confidence(&self) -> Option<f64> {
+        self.confidence
+    }
+
+    #[getter]
+    fn speaker(&self) -> Option<String> {
+        self.speaker.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TranscriptionSegment(id={}, text={:?})",
+            self.id, self.text
+        )
+    }
+}
+
+impl TranscriptionSegment {
+    fn from_core(s: CoreTranscriptionSegment) -> Self {
+        Self {
+            id: s.id,
+            start: s.start,
+            end: s.end,
+            text: s.text,
+            confidence: s.confidence,
+            speaker: s.speaker,
+        }
+    }
+}
+
+/// 语音转文字结果
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct TranscriptionResult {
+    text: String,
+    language: Option<String>,
+    duration: Option<f64>,
+    task: String,
+    model: Option<String>,
+    segments: Option<Vec<TranscriptionSegment>>,
+    words: Option<Vec<TranscriptionWord>>,
+}
+
+#[pymethods]
+impl TranscriptionResult {
+    #[getter]
+    fn text(&self) -> String {
+        self.text.clone()
+    }
+
+    #[getter]
+    fn language(&self) -> Option<String> {
+        self.language.clone()
+    }
+
+    #[getter]
+    fn duration(&self) -> Option<f64> {
+        self.duration
+    }
+
+    #[getter]
+    fn task(&self) -> String {
+        self.task.clone()
+    }
+
+    #[getter]
+    fn model(&self) -> Option<String> {
+        self.model.clone()
+    }
+
+    #[getter]
+    fn segments(&self) -> Option<Vec<TranscriptionSegment>> {
+        self.segments.clone()
+    }
+
+    #[getter]
+    fn words(&self) -> Option<Vec<TranscriptionWord>> {
+        self.words.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TranscriptionResult(text={:?}, language={:?})",
+            self.text, self.language
+        )
+    }
+}
+
+impl TranscriptionResult {
+    fn from_core(r: CoreTranscriptionResult) -> Self {
+        Self {
+            text: r.text,
+            language: r.language,
+            duration: r.duration,
+            task: r.task,
+            model: r.model,
+            segments: r
+                .segments
+                .map(|s| s.into_iter().map(TranscriptionSegment::from_core).collect()),
+            words: r
+                .words
+                .map(|w| w.into_iter().map(TranscriptionWord::from_core).collect()),
+        }
+    }
+}
+
+/// 单个嵌入项
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct EmbeddingItem {
+    index: u32,
+    embedding: Vec<f64>,
+}
+
+#[pymethods]
+impl EmbeddingItem {
+    #[getter]
+    fn index(&self) -> u32 {
+        self.index
+    }
+
+    #[getter]
+    fn embedding(&self) -> Vec<f64> {
+        self.embedding.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "EmbeddingItem(index={}, dim={})",
+            self.index,
+            self.embedding.len()
+        )
+    }
+}
+
+impl EmbeddingItem {
+    fn from_core(i: CoreEmbeddingItem) -> Self {
+        let embedding = match i.embedding {
+            CoreEmbeddingVector::Float(v) => v,
+            // base64 编码向量未解码，返空（echo 及多数 provider 走 Float）
+            CoreEmbeddingVector::Base64(_) => Vec::new(),
+        };
+        Self {
+            index: i.index,
+            embedding,
+        }
+    }
+}
+
+/// 文本嵌入结果
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct EmbeddingResult {
+    model: String,
+    data: Vec<EmbeddingItem>,
+    prompt_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+}
+
+#[pymethods]
+impl EmbeddingResult {
+    #[getter]
+    fn model(&self) -> String {
+        self.model.clone()
+    }
+
+    #[getter]
+    fn data(&self) -> Vec<EmbeddingItem> {
+        self.data.clone()
+    }
+
+    #[getter]
+    fn prompt_tokens(&self) -> Option<u64> {
+        self.prompt_tokens
+    }
+
+    #[getter]
+    fn total_tokens(&self) -> Option<u64> {
+        self.total_tokens
+    }
+
+    /// 提取所有嵌入向量（便捷访问，等价于 `[item.embedding for item in data]`）
+    fn get_embeddings(&self) -> Vec<Vec<f64>> {
+        self.data.iter().map(|i| i.embedding.clone()).collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "EmbeddingResult(model={:?}, count={})",
+            self.model,
+            self.data.len()
+        )
+    }
+}
+
+impl EmbeddingResult {
+    fn from_core(r: CoreEmbeddingResult) -> Self {
+        let (prompt_tokens, total_tokens) = r
+            .usage
+            .map(|u| (u.prompt_tokens, u.total_tokens))
+            .unzip();
+        Self {
+            model: r.model,
+            data: r.data.into_iter().map(EmbeddingItem::from_core).collect(),
+            prompt_tokens,
+            total_tokens,
+        }
+    }
+}
+
+/// 模型信息
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct ModelInfo {
+    id: String,
+    name: String,
+    model_type: String,
+    provider: String,
+    capabilities: Vec<String>,
+    max_tokens: Option<u32>,
+    supports_streaming: bool,
+    description: Option<String>,
+    created: Option<u64>,
+}
+
+#[pymethods]
+impl ModelInfo {
+    #[getter]
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+
+    /// 模型类型（"chat"/"image"/"video"/"audio"）
+    #[getter(r#type)]
+    fn model_type(&self) -> String {
+        self.model_type.clone()
+    }
+
+    #[getter]
+    fn provider(&self) -> String {
+        self.provider.clone()
+    }
+
+    #[getter]
+    fn capabilities(&self) -> Vec<String> {
+        self.capabilities.clone()
+    }
+
+    #[getter]
+    fn max_tokens(&self) -> Option<u32> {
+        self.max_tokens
+    }
+
+    #[getter]
+    fn supports_streaming(&self) -> bool {
+        self.supports_streaming
+    }
+
+    #[getter]
+    fn description(&self) -> Option<String> {
+        self.description.clone()
+    }
+
+    #[getter]
+    fn created(&self) -> Option<u64> {
+        self.created
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ModelInfo(id={:?}, type={:?}, provider={:?})",
+            self.id, self.model_type, self.provider
+        )
+    }
+}
+
+impl ModelInfo {
+    fn from_core(m: CoreModelInfo) -> Self {
+        Self {
+            id: m.id,
+            name: m.name,
+            model_type: m.model_type.as_str().to_string(),
+            provider: m.provider,
+            capabilities: m.capabilities,
+            max_tokens: m.max_tokens,
+            supports_streaming: m.supports_streaming,
+            description: m.description,
+            created: m.created,
+        }
+    }
+}
+
+/// 音色信息
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct VoiceInfo {
+    short_name: Option<String>,
+    name: Option<String>,
+    locale: Option<String>,
+    gender: Option<String>,
+    voice_id: Option<String>,
+}
+
+#[pymethods]
+impl VoiceInfo {
+    #[getter]
+    fn short_name(&self) -> Option<String> {
+        self.short_name.clone()
+    }
+
+    #[getter]
+    fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
+    #[getter]
+    fn locale(&self) -> Option<String> {
+        self.locale.clone()
+    }
+
+    #[getter]
+    fn gender(&self) -> Option<String> {
+        self.gender.clone()
+    }
+
+    #[getter]
+    fn voice_id(&self) -> Option<String> {
+        self.voice_id.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VoiceInfo(short_name={:?}, locale={:?}, gender={:?})",
+            self.short_name, self.locale, self.gender
+        )
+    }
+}
+
+impl VoiceInfo {
+    fn from_core(v: CoreVoiceInfo) -> Self {
+        Self {
+            short_name: v.short_name,
+            name: v.name,
+            locale: v.locale,
+            gender: v.gender,
+            voice_id: v.voice_id,
+        }
+    }
+}
+
 // ===========================================================================
 // 流式迭代器
 // ===========================================================================
@@ -832,6 +1635,384 @@ impl Client {
         let speech = result.map_err(map_error)?;
         Ok(SpeechResult::from_core(speech))
     }
+
+    /// 图像生成
+    ///
+    /// 参数：
+    /// - `model`: 图像模型名称
+    /// - `prompt`: 提示词
+    /// - `size`: 图像尺寸（默认 "1024x1024"）
+    /// - `n`: 生成数量（默认 1）
+    /// - `negative_prompt`: 负面提示词
+    /// - `reference_images`: 参考图列表（图生图），元素为 str（路径/URL）或 bytes
+    /// - `mask`: 遮罩图（局部重绘），str 或 bytes
+    /// - `response_format`: 响应格式（"url"/"b64_json"，默认 "url"）
+    /// - `**kwargs`: 厂商特有参数透传
+    #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+    #[pyo3(signature = (model, prompt, size="1024x1024", n=1, negative_prompt=None, reference_images=None, mask=None, response_format="url", **kwargs))]
+    async fn image_generate(
+        &self,
+        model: String,
+        prompt: String,
+        size: &str,
+        n: u32,
+        negative_prompt: Option<String>,
+        reference_images: Option<Vec<Py<PyAny>>>,
+        mask: Option<Py<PyAny>>,
+        response_format: &str,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<ImageResult> {
+        // 在持 GIL 时转换 Python 对象为 core 类型（**kwargs / reference_images / mask）
+        let (extra, ref_imgs, mask_input) = Python::attach(|py| -> PyResult<(
+            std::collections::HashMap<String, serde_json::Value>,
+            Vec<CoreFileInput>,
+            Option<CoreFileInput>,
+        )> {
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            let ref_imgs = match &reference_images {
+                Some(imgs) => imgs
+                    .iter()
+                    .map(|i| py_to_file_input(i.bind(py)))
+                    .collect::<PyResult<Vec<_>>>()?,
+                None => Vec::new(),
+            };
+            let mask_input = match &mask {
+                Some(m) => Some(py_to_file_input(m.bind(py))?),
+                None => None,
+            };
+            Ok((extra, ref_imgs, mask_input))
+        })?;
+
+        let mut builder = CoreImageRequest::builder(model, prompt)
+            .size(size)
+            .n(n)
+            .response_format(response_format);
+        if let Some(np) = negative_prompt {
+            builder = builder.negative_prompt(np);
+        }
+        if !ref_imgs.is_empty() {
+            builder = builder.reference_images(ref_imgs);
+        }
+        if let Some(m) = mask_input {
+            builder = builder.mask(m);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.image_generate(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("image_generate 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(ImageResult::from_core(r))
+    }
+
+    /// 创建视频生成任务
+    ///
+    /// 参数：
+    /// - `model`: 视频模型名称
+    /// - `prompt`: 提示词
+    /// - `width`/`height`: 视频分辨率（默认 1280x720）
+    /// - `num_frames`: 帧数（部分模型需要）
+    /// - `frame_rate`: 帧率（默认 24）
+    /// - `mode`: 生成模式（"text2video"/"image2video"/"keyframes"/"multiimage"，默认 "text2video"）
+    /// - `reference_images`: 参考图列表（图生视频）
+    /// - `negative_prompt`: 负面提示词
+    /// - `seed`: 随机种子
+    /// - `**kwargs`: 厂商特有参数透传
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (model, prompt, width=1280, height=720, num_frames=None, frame_rate=24, mode="text2video", reference_images=None, negative_prompt=None, seed=None, **kwargs))]
+    async fn video_create(
+        &self,
+        model: String,
+        prompt: String,
+        width: u32,
+        height: u32,
+        num_frames: Option<u32>,
+        frame_rate: u32,
+        mode: &str,
+        reference_images: Option<Vec<Py<PyAny>>>,
+        negative_prompt: Option<String>,
+        seed: Option<u64>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<VideoTask> {
+        let (extra, ref_imgs) = Python::attach(|py| -> PyResult<(
+            std::collections::HashMap<String, serde_json::Value>,
+            Vec<CoreFileInput>,
+        )> {
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            let ref_imgs = match &reference_images {
+                Some(imgs) => imgs
+                    .iter()
+                    .map(|i| py_to_file_input(i.bind(py)))
+                    .collect::<PyResult<Vec<_>>>()?,
+                None => Vec::new(),
+            };
+            Ok((extra, ref_imgs))
+        })?;
+
+        let mut builder = CoreVideoRequest::builder(model, prompt)
+            .width(width)
+            .height(height)
+            .frame_rate(frame_rate)
+            .mode(parse_video_mode(mode));
+        if let Some(nf) = num_frames {
+            builder = builder.num_frames(nf);
+        }
+        if !ref_imgs.is_empty() {
+            builder = builder.reference_images(ref_imgs);
+        }
+        if let Some(np) = negative_prompt {
+            builder = builder.negative_prompt(np);
+        }
+        if let Some(s) = seed {
+            builder = builder.seed(s);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.video_create(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("video_create 任务失败: {e}"))
+            })?;
+
+        let t = result.map_err(map_error)?;
+        Ok(VideoTask::from_core(t))
+    }
+
+    /// 查询视频任务状态
+    ///
+    /// 参数：
+    /// - `task_id`: 任务 ID（由 `video_create` 返回）
+    /// - `model`: 模型名称（部分 Provider 需要，默认空串）
+    #[pyo3(signature = (task_id, model=""))]
+    async fn video_poll(&self, task_id: String, model: &str) -> PyResult<VideoStatus> {
+        // model 为 &str（借用），spawn 需 'static，故先转 owned
+        let model = model.to_string();
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.video_poll(&task_id, &model).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("video_poll 任务失败: {e}"))
+            })?;
+
+        let s = result.map_err(map_error)?;
+        Ok(VideoStatus::from_core(s))
+    }
+
+    /// 语音转文字
+    ///
+    /// 参数：
+    /// - `model`: ASR 模型名称
+    /// - `file`: 音频文件（str 路径/URL 或 bytes）
+    /// - `language`: 语言代码（如 "zh"、"en"）
+    /// - `prompt`: 提示词（改善专有名词识别）
+    /// - `response_format`: 响应格式（默认 "json"）
+    /// - `temperature`: 温度系数（0-1）
+    /// - `**kwargs`: 厂商特有参数透传
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (model, file, language=None, prompt=None, response_format="json", temperature=None, **kwargs))]
+    async fn transcribe(
+        &self,
+        model: String,
+        file: Py<PyAny>,
+        language: Option<String>,
+        prompt: Option<String>,
+        response_format: &str,
+        temperature: Option<f64>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<TranscriptionResult> {
+        let (file_input, extra) = Python::attach(|py| -> PyResult<(
+            CoreFileInput,
+            std::collections::HashMap<String, serde_json::Value>,
+        )> {
+            let file_input = py_to_file_input(file.bind(py))?;
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            Ok((file_input, extra))
+        })?;
+
+        let mut builder = CoreTranscribeRequest::builder(model, file_input)
+            .response_format(response_format);
+        if let Some(l) = language {
+            builder = builder.language(l);
+        }
+        if let Some(p) = prompt {
+            builder = builder.prompt(p);
+        }
+        if let Some(t) = temperature {
+            builder = builder.temperature(t);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.transcribe(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("transcribe 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(TranscriptionResult::from_core(r))
+    }
+
+    /// 文本嵌入
+    ///
+    /// 参数：
+    /// - `model`: 嵌入模型名称
+    /// - `input`: 文本（str 或 list[str]）
+    /// - `**kwargs`: 厂商特有参数透传
+    #[pyo3(signature = (model, input, **kwargs))]
+    async fn embed(
+        &self,
+        model: String,
+        input: Py<PyAny>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<EmbeddingResult> {
+        let (embed_input, extra) = Python::attach(|py| -> PyResult<(
+            CoreEmbedInput,
+            std::collections::HashMap<String, serde_json::Value>,
+        )> {
+            let embed_input = py_to_embed_input(input.bind(py))?;
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            Ok((embed_input, extra))
+        })?;
+
+        let req = CoreEmbedRequest {
+            model,
+            input: embed_input,
+            dimensions: None,
+            encoding_format: None,
+            user: None,
+            extra,
+        };
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.embed(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("embed 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(EmbeddingResult::from_core(r))
+    }
+
+    /// 获取可用模型列表
+    ///
+    /// 参数：
+    /// - `model_type`: 可选模型类型过滤（"chat"/"image"/"video"/"audio"）
+    #[pyo3(signature = (model_type=None))]
+    async fn list_models(&self, model_type: Option<String>) -> PyResult<Vec<ModelInfo>> {
+        let filter = model_type.map(|s| CoreModelType::from(s.as_str()));
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.list_models(filter).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("list_models 任务失败: {e}"))
+            })?;
+
+        let models = result.map_err(map_error)?;
+        Ok(models.into_iter().map(ModelInfo::from_core).collect())
+    }
+
+    /// 获取 Provider 可用音色列表
+    ///
+    /// 参数：
+    /// - `language`: 可选语言过滤（如 "zh-CN"）
+    #[pyo3(signature = (language=None))]
+    async fn list_voices(&self, language: Option<String>) -> PyResult<Vec<VoiceInfo>> {
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.list_voices(language.as_deref()).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("list_voices 任务失败: {e}"))
+            })?;
+
+        let voices = result.map_err(map_error)?;
+        Ok(voices.into_iter().map(VoiceInfo::from_core).collect())
+    }
+
+    /// 推荐可用音色（按语言/性别过滤）
+    ///
+    /// 参数：
+    /// - `language`: 可选语言过滤（如 "zh-CN"）
+    /// - `gender`: 可选性别过滤（"Female"/"Male"）
+    /// - `limit`: 返回数量上限（默认 10）
+    #[pyo3(signature = (language=None, gender=None, limit=10))]
+    async fn recommend_voices(
+        &self,
+        language: Option<String>,
+        gender: Option<String>,
+        limit: usize,
+    ) -> PyResult<Vec<VoiceInfo>> {
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client
+                    .recommend_voices(language.as_deref(), gender.as_deref(), limit)
+                    .await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("recommend_voices 任务失败: {e}"))
+            })?;
+
+        let voices = result.map_err(map_error)?;
+        Ok(voices.into_iter().map(VoiceInfo::from_core).collect())
+    }
 }
 
 // ===========================================================================
@@ -886,6 +2067,17 @@ fn _aibridge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ChatCompletionChunk>()?;
     m.add_class::<ChatChunkDelta>()?;
     m.add_class::<SpeechResult>()?;
+    m.add_class::<ImageData>()?;
+    m.add_class::<ImageResult>()?;
+    m.add_class::<VideoTask>()?;
+    m.add_class::<VideoStatus>()?;
+    m.add_class::<TranscriptionWord>()?;
+    m.add_class::<TranscriptionSegment>()?;
+    m.add_class::<TranscriptionResult>()?;
+    m.add_class::<EmbeddingItem>()?;
+    m.add_class::<EmbeddingResult>()?;
+    m.add_class::<ModelInfo>()?;
+    m.add_class::<VoiceInfo>()?;
 
     // 客户端与流式
     m.add_class::<Client>()?;
