@@ -51,3 +51,9 @@ pub mod anthropic;
 
 /// Stability AI 适配器：阶段 2b 独立协议，文生图/图生图
 pub mod stability;
+
+/// Runway 适配器：阶段 2b 独立协议，视频生成（文生视频/图生视频/任务轮询）
+pub mod runway;
+
+/// Pika 适配器：阶段 2b 独立协议，视频生成（文生视频/图生视频/任务轮询）
+pub mod pika;

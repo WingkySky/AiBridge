@@ -27,6 +27,8 @@ use crate::adapters::more_models::{
     CohereAdapter, DeepSeekAdapter, MistralAdapter, PerplexityAdapter, StepFunAdapter,
 };
 use crate::adapters::openai::OpenAiAdapter;
+use crate::adapters::pika::PikaAdapter;
+use crate::adapters::runway::RunwayAdapter;
 use crate::adapters::stability::StabilityAdapter;
 use crate::adapters::volcengine_cv::VolcengineCvAdapter;
 use crate::config::ProviderConfig;
@@ -72,9 +74,10 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     // 阶段 2b 第一批独立协议（已实现）：
     "anthropic",
     "stability",
-    // 阶段 2b/2c 待实现：
+    // 阶段 2b 第二批独立协议（已实现）：
     "runway",
     "pika",
+    // 阶段 2b/2c 待实现：
     "kling",
     "edge-tts",
     "elevenlabs",
@@ -134,11 +137,15 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         // 阶段 2b 独立协议：别名对齐 Python agn/adapters/{anthropic,stability}.py 末尾 register 调用（均无别名）
         "anthropic" => Ok(Box::new(AnthropicAdapter::new(config)?)),
         "stability" => Ok(Box::new(StabilityAdapter::new(config)?)),
+        // 阶段 2b 第二批独立协议：别名对齐 Python agn/adapters/{runway,pika}.py 末尾 register 调用（均无别名）
+        "runway" => Ok(Box::new(RunwayAdapter::new(config)?)),
+        "pika" => Ok(Box::new(PikaAdapter::new(config)?)),
         // 阶段 2 适配器占位
-        "runway" | "pika" | "kling" | "edge-tts" | "elevenlabs" | "cartesia" | "deepgram"
-        | "assemblyai" => Err(AibridgeError::ProviderNotFound {
-            provider: format!("{provider}（阶段 2 待实现）"),
-        }),
+        "kling" | "edge-tts" | "elevenlabs" | "cartesia" | "deepgram" | "assemblyai" => {
+            Err(AibridgeError::ProviderNotFound {
+                provider: format!("{provider}（阶段 2 待实现）"),
+            })
+        }
         // 未知 provider
         _ => Err(AibridgeError::provider_not_found(format!(
             "{provider}（未知 provider，支持：{}）",
@@ -423,6 +430,20 @@ mod tests {
     }
 
     #[test]
+    fn create_runway_returns_adapter() {
+        // 阶段 2b：RunwayAdapter 自带 DEFAULT_RUNWAY_BASE_URL 兜底，仅需 api_key
+        let adapter = create_adapter(config_for("runway")).expect("工厂应能创建 runway 适配器");
+        assert_eq!(adapter.provider_type(), "runway");
+    }
+
+    #[test]
+    fn create_pika_returns_adapter() {
+        // 阶段 2b：PikaAdapter 自带 DEFAULT_PIKA_BASE_URL 兜底，仅需 api_key
+        let adapter = create_adapter(config_for("pika")).expect("工厂应能创建 pika 适配器");
+        assert_eq!(adapter.provider_type(), "pika");
+    }
+
+    #[test]
     fn create_additional_models_aliases_map_to_main_provider_type() {
         // 别名对齐 Python agn/adapters/additional_models.py 末尾 register 调用：
         // xaigrok -> grok / lingyiwanwu -> yi / shangtang -> sensenova / tencent_hunyuan -> hunyuan
@@ -449,8 +470,8 @@ mod tests {
 
     #[test]
     fn create_phase2_adapter_returns_phase2_message() {
-        // runway 仍为阶段 2 占位（未实现），返 ProviderNotFound
-        let result = create_adapter(config_for("runway"));
+        // kling 仍为阶段 2 占位（未实现），返 ProviderNotFound
+        let result = create_adapter(config_for("kling"));
         if let Err(AibridgeError::ProviderNotFound { provider }) = result {
             assert!(provider.contains("阶段 2"));
         } else {
@@ -492,6 +513,9 @@ mod tests {
         // 阶段 2b 第一批独立协议
         assert!(is_known_provider("anthropic"));
         assert!(is_known_provider("stability"));
+        // 阶段 2b 第二批独立协议
+        assert!(is_known_provider("runway"));
+        assert!(is_known_provider("pika"));
     }
 
     #[test]
