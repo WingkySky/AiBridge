@@ -48,6 +48,7 @@ name = "aibridge-node"
 version = "2.0.0-alpha.1"
 dependencies = [
  "aibridge-core",
+ "futures",
  "napi",
  "napi-build",
  "napi-derive",
@@ -60,6 +61,8 @@ name = "aibridge-python"
 version = "2.0.0-alpha.1"
 dependencies = [
  "aibridge-core",
+ "futures",
+ "once_cell",
  "pyo3",
  "serde_json",
  "tokio",
@@ -809,6 +812,8 @@ dependencies = [
  "napi-derive",
  "napi-sys",
  "once_cell",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
