@@ -69,3 +69,9 @@ pub mod elevenlabs;
 
 /// Cartesia 适配器：阶段 2c 音频，Cartesia Sonic TTS 文字转语音（低延迟流式）
 pub mod cartesia;
+
+/// Deepgram 适配器：阶段 2c 音频，Deepgram ASR 语音转文字（Token 鉴权 / REST 协议）
+pub mod deepgram;
+
+/// AssemblyAI 适配器：阶段 2c 音频，AssemblyAI ASR 语音转文字（Key 鉴权 / REST 协议）
+pub mod assemblyai;

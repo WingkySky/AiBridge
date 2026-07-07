@@ -16,11 +16,13 @@ use crate::adapters::aggregation_platforms::{
 };
 use crate::adapters::agnes::AgnesAdapter;
 use crate::adapters::anthropic::AnthropicAdapter;
+use crate::adapters::assemblyai::AssemblyAiAdapter;
 use crate::adapters::azure::AzureAdapter;
 use crate::adapters::cartesia::CartesiaAdapter;
 use crate::adapters::chinese::{
     DoubaoAdapter, ErnieAdapter, KimiAdapter, MiniMaxAdapter, QwenAdapter, ZhipuAdapter,
 };
+use crate::adapters::deepgram::DeepgramAdapter;
 use crate::adapters::echo::EchoAdapter;
 use crate::adapters::edge_tts::EdgeTtsAdapter;
 use crate::adapters::elevenlabs::ElevenLabsAdapter;
@@ -87,7 +89,6 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "edge-tts",
     "elevenlabs",
     "cartesia",
-    // 阶段 2c 待实现：
     "deepgram",
     "assemblyai",
 ];
@@ -155,10 +156,11 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         "elevenlabs" | "eleven" | "11labs" => Ok(Box::new(ElevenLabsAdapter::new(config)?)),
         // （cartesia / sonic 均指向 CartesiaAdapter）
         "cartesia" | "sonic" => Ok(Box::new(CartesiaAdapter::new(config)?)),
-        // 阶段 2c 适配器占位
-        "deepgram" | "assemblyai" => Err(AibridgeError::ProviderNotFound {
-            provider: format!("{provider}（阶段 2c 待实现）"),
-        }),
+        // 阶段 2c 音频 ASR：别名对齐 Python agn/adapters/audio_adapters.py 末尾 register 调用
+        // （deepgram / dg 均指向 DeepgramAdapter）
+        "deepgram" | "dg" => Ok(Box::new(DeepgramAdapter::new(config)?)),
+        // （assemblyai / assembly / aai 均指向 AssemblyAiAdapter）
+        "assemblyai" | "assembly" | "aai" => Ok(Box::new(AssemblyAiAdapter::new(config)?)),
         // 未知 provider
         _ => Err(AibridgeError::provider_not_found(format!(
             "{provider}（未知 provider，支持：{}）",
@@ -541,14 +543,37 @@ mod tests {
     }
 
     #[test]
-    fn create_phase2_adapter_returns_phase2_message() {
-        // deepgram 仍为阶段 2c 占位（未实现），返 ProviderNotFound
-        let result = create_adapter(config_for("deepgram"));
-        if let Err(AibridgeError::ProviderNotFound { provider }) = result {
-            assert!(provider.contains("阶段 2"));
-        } else {
-            panic!("应为 ProviderNotFound");
-        }
+    fn create_deepgram_returns_adapter() {
+        // 阶段 2c：DeepgramAdapter 自带 DEFAULT_API_BASE 兜底，仅需 api_key
+        let adapter = create_adapter(config_for("deepgram")).expect("工厂应能创建 deepgram 适配器");
+        assert_eq!(adapter.provider_type(), "deepgram");
+    }
+
+    #[test]
+    fn create_assemblyai_returns_adapter() {
+        // 阶段 2c：AssemblyAiAdapter 自带 DEFAULT_API_BASE 兜底，api_key 可空（调用时 401）
+        let adapter =
+            create_adapter(config_for("assemblyai")).expect("工厂应能创建 assemblyai 适配器");
+        assert_eq!(adapter.provider_type(), "assemblyai");
+    }
+
+    #[test]
+    fn create_deepgram_aliases_map_to_main_provider_type() {
+        // 别名对齐 Python agn/adapters/audio_adapters.py 末尾 register 调用：
+        // dg -> deepgram（指向 DeepgramAdapter）
+        let dg = create_adapter(config_for("dg")).expect("别名 dg 应映射到 deepgram");
+        assert_eq!(dg.provider_type(), "deepgram");
+    }
+
+    #[test]
+    fn create_assemblyai_aliases_map_to_main_provider_type() {
+        // 别名对齐 Python agn/adapters/audio_adapters.py 末尾 register 调用：
+        // assembly / aai -> assemblyai（指向 AssemblyAiAdapter）
+        let assembly =
+            create_adapter(config_for("assembly")).expect("别名 assembly 应映射到 assemblyai");
+        assert_eq!(assembly.provider_type(), "assemblyai");
+        let aai = create_adapter(config_for("aai")).expect("别名 aai 应映射到 assemblyai");
+        assert_eq!(aai.provider_type(), "assemblyai");
     }
 
     #[test]
@@ -558,6 +583,7 @@ mod tests {
         assert!(is_known_provider("edge-tts"));
         assert!(is_known_provider("elevenlabs"));
         assert!(is_known_provider("cartesia"));
+        assert!(is_known_provider("deepgram"));
         assert!(is_known_provider("assemblyai"));
         assert!(is_known_provider("kling"));
         // 阶段 2a 已实现 provider 应被识别
