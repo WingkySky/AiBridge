@@ -204,6 +204,31 @@ impl AgnesAdapter {
 
     // ==================== 视频协议（Agnes 特有） ====================
 
+    /// 将统一 `VideoMode` 映射为 Agnes 平台要求的 mode 字符串
+    ///
+    /// Agnes Video V2.0 平台只接受三种 mode（真实 API 校验，否则报
+    /// `[validation_error] Input should be 'ti2vid', 'keyframes' or
+    /// 'multi_reference'`）：
+    /// - `ti2vid`：文本/图像生成视频（文生视频 + 单图生视频）
+    /// - `keyframes`：关键帧模式（首尾帧）
+    /// - `multi_reference`：多参考图模式
+    ///
+    /// 统一 `VideoMode` 到 Agnes mode 的映射：
+    /// - `Text2Video` / `Image2Video` -> `ti2vid`
+    /// - `Keyframes` -> `keyframes`
+    /// - `Multiimage` -> `multi_reference`
+    ///
+    /// 注意：Python v1 `agnes.py` 直接透传 mode（同样存在该 bug），此处以
+    /// Agnes 平台实际校验为准做显式映射。
+    fn map_video_mode(mode: crate::model::common::VideoMode) -> &'static str {
+        use crate::model::common::VideoMode;
+        match mode {
+            VideoMode::Text2Video | VideoMode::Image2Video => "ti2vid",
+            VideoMode::Keyframes => "keyframes",
+            VideoMode::Multiimage => "multi_reference",
+        }
+    }
+
     /// 构造视频创建请求体
     ///
     /// 对应 Python v1 `agnes.py:video_create` 的 body 构造逻辑：
@@ -231,8 +256,8 @@ impl AgnesAdapter {
         if req.frame_rate != 0 {
             body["frame_rate"] = json!(req.frame_rate);
         }
-        // mode 序列化为小写字符串（text2video / image2video / keyframes / multiimage）
-        body["mode"] = json!(serde_json::to_value(req.mode).unwrap_or(json!("text2video")));
+        // mode 映射为 Agnes 平台要求的字符串（ti2vid / keyframes / multi_reference）
+        body["mode"] = json!(Self::map_video_mode(req.mode));
         if let Some(seed) = req.seed {
             body["seed"] = json!(seed);
         }
@@ -743,7 +768,7 @@ mod tests {
             .match_body(mockito::Matcher::PartialJson(json!({
                 "model": "seedance-2.0",
                 "prompt": "a cat walking",
-                "mode": "text2video"
+                "mode": "ti2vid"
             })))
             .with_status(200)
             .with_body(body.to_string())
@@ -792,7 +817,7 @@ mod tests {
                 "prompt": "a cat",
                 "width": 1920,
                 "height": 1080,
-                "mode": "image2video",
+                "mode": "ti2vid",
                 "seed": 42
             })))
             .with_status(200)
@@ -817,7 +842,7 @@ mod tests {
         let mock = server
             .mock("POST", "/videos")
             .match_body(mockito::Matcher::PartialJson(json!({
-                "mode": "image2video",
+                "mode": "ti2vid",
                 "extra_body": {"image": "https://example.com/ref.png"}
             })))
             .with_status(200)
@@ -871,7 +896,7 @@ mod tests {
         let mock = server
             .mock("POST", "/videos")
             .match_body(mockito::Matcher::PartialJson(json!({
-                "mode": "multiimage",
+                "mode": "multi_reference",
                 "extra_body": {
                     "image": ["https://example.com/a.png", "https://example.com/b.png"]
                 }
@@ -1354,12 +1379,34 @@ mod tests {
     }
 
     #[test]
+    fn map_video_mode_aligns_with_agnes_platform() {
+        // Agnes 平台只接受 ti2vid / keyframes / multi_reference 三种 mode
+        // 文生/图生视频统一映射为 ti2vid
+        assert_eq!(
+            AgnesAdapter::map_video_mode(VideoMode::Text2Video),
+            "ti2vid"
+        );
+        assert_eq!(
+            AgnesAdapter::map_video_mode(VideoMode::Image2Video),
+            "ti2vid"
+        );
+        assert_eq!(
+            AgnesAdapter::map_video_mode(VideoMode::Keyframes),
+            "keyframes"
+        );
+        assert_eq!(
+            AgnesAdapter::map_video_mode(VideoMode::Multiimage),
+            "multi_reference"
+        );
+    }
+
+    #[test]
     fn build_video_body_text2video_minimal() {
         let req = VideoRequest::builder("seedance-2.0", "a cat").build();
         let body = AgnesAdapter::build_video_body(&req);
         assert_eq!(body["model"], "seedance-2.0");
         assert_eq!(body["prompt"], "a cat");
-        assert_eq!(body["mode"], "text2video");
+        assert_eq!(body["mode"], "ti2vid");
         // 无参考图像时不应有 extra_body
         assert!(body.get("extra_body").is_none());
     }
