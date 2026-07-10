@@ -89,17 +89,12 @@ jobs:
       - name: maturin build wheel
         shell: bash
         run: |
-          cd crates/aibridge-python
-          if [ "${{ matrix.label }}" = "macos-universal2" ]; then
-            maturin build --release --universal2
-          else
-            maturin build --release
-          fi
+          maturin build --manifest-path crates/aibridge-python/Cargo.toml --release $([ "${{ matrix.label }}" = "macos-universal2" ] && echo "--universal2")
       - name: 上传 wheel 产物
         uses: actions/upload-artifact@v4
         with:
           name: python-wheel-${{ matrix.label }}
-          path: crates/aibridge-python/target/wheels/*.whl
+          path: target/wheels/*.whl
           if-no-files-found: warn
 
   # ──────────────────────────────────────────────────────────────────────────

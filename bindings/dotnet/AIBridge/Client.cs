@@ -102,8 +102,7 @@ public sealed class Client : IDisposable
         }
 
         // 成功：用 SafeHandle 接管字符串，拷贝后释放
-        var handle = new AibridgeStringHandle();
-        handle.SetHandle(outResponse);
+        var handle = new AibridgeStringHandle(outResponse);
         string? responseJson = handle.MarshalAndFree();
 
         if (string.IsNullOrEmpty(responseJson))
@@ -169,8 +168,7 @@ public sealed class Client : IDisposable
                     if (s == AibridgeStatus.StreamChunk && outChunk != IntPtr.Zero)
                     {
                         // 拷贝 chunk JSON 并释放原生字符串（SafeHandle 兜底释放）
-                        var h = new AibridgeStringHandle();
-                        h.SetHandle(outChunk);
+                        var h = new AibridgeStringHandle(outChunk);
                         json = h.MarshalAndFree();
                     }
                     else if (outChunk != IntPtr.Zero)
@@ -243,8 +241,7 @@ public sealed class Client : IDisposable
         byte[] audioData = Array.Empty<byte>();
         if (outAudio != IntPtr.Zero)
         {
-            var audioHandle = new AibridgeBytesHandle();
-            audioHandle.SetHandle(outAudio);
+            var audioHandle = new AibridgeBytesHandle(outAudio);
             audioData = audioHandle.MarshalAndFree();
         }
 
@@ -252,8 +249,7 @@ public sealed class Client : IDisposable
         SpeechResult? result;
         if (outMeta != IntPtr.Zero)
         {
-            var metaHandle = new AibridgeStringHandle();
-            metaHandle.SetHandle(outMeta);
+            var metaHandle = new AibridgeStringHandle(outMeta);
             string? metaJson = metaHandle.MarshalAndFree();
             result = string.IsNullOrEmpty(metaJson)
                 ? new SpeechResult()

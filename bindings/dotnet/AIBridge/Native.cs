@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Reflection;
 
 namespace AIBridge;
 
@@ -61,6 +62,9 @@ internal sealed class AibridgeStringHandle : SafeHandle
 {
     public AibridgeStringHandle() : base(IntPtr.Zero, ownsHandle: true) { }
 
+    /// <summary>用已有句柄构造（由调用方移交所有权）。</summary>
+    public AibridgeStringHandle(IntPtr preexistingHandle) : base(preexistingHandle, ownsHandle: true) { }
+
     public override bool IsInvalid => handle == IntPtr.Zero;
 
     protected override bool ReleaseHandle()
@@ -88,6 +92,9 @@ internal sealed class AibridgeStringHandle : SafeHandle
 internal sealed class AibridgeBytesHandle : SafeHandle
 {
     public AibridgeBytesHandle() : base(IntPtr.Zero, ownsHandle: true) { }
+
+    /// <summary>用已有句柄构造（由调用方移交所有权）。</summary>
+    public AibridgeBytesHandle(IntPtr preexistingHandle) : base(preexistingHandle, ownsHandle: true) { }
 
     public override bool IsInvalid => handle == IntPtr.Zero;
 
@@ -236,8 +243,8 @@ internal static class NativeResolver
     {
         if (Interlocked.CompareExchange(ref _registered, 1, 0) != 0) return;
 
-        // 解析回调签名：(string libName, Assembly asm, DllImportSearchPath? searchPath, IntPtr) => IntPtr
-        IntPtr Resolver(string lib, Assembly asm, DllImportSearchPath? search, IntPtr callers)
+        // 解析回调签名：(string libName, Assembly asm, DllImportSearchPath? searchPath) => IntPtr
+        IntPtr Resolver(string lib, Assembly asm, DllImportSearchPath? search)
         {
             // 仅处理本绑定的库名（其它库走默认解析）
             if (!string.Equals(lib, libraryName, StringComparison.OrdinalIgnoreCase))
@@ -267,7 +274,7 @@ internal static class NativeResolver
                 string full = Path.Combine(dir, NativeFileName(libraryName));
                 if (File.Exists(full))
                 {
-                    return NativeLibrary.Load(full, asm, DllImportSearchPath.Default);
+                    return NativeLibrary.Load(full, asm, null);
                 }
             }
 
@@ -280,13 +287,13 @@ internal static class NativeResolver
                     string full = Path.Combine(repoRoot, "target", profile, NativeFileName(libraryName));
                     if (File.Exists(full))
                     {
-                        return NativeLibrary.Load(full, asm, DllImportSearchPath.Default);
+                        return NativeLibrary.Load(full, asm, null);
                     }
                 }
             }
 
             // 最后让 .NET 用默认搜索（系统库目录等）
-            return NativeLibrary.Load(libraryName, asm, DllImportSearchPath.Default);
+            return NativeLibrary.Load(libraryName, asm, null);
         }
 
         NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolver);

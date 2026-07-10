@@ -16,7 +16,7 @@ package aibridge
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../crates/aibridge-ffi/include
-#cgo LDFLAGS: -L${SRCDIR}/../../target/debug -laibridge -lm
+#cgo LDFLAGS: -L${SRCDIR}/../../target/release -laibridge -lm
 
 #include <stdlib.h>
 #include "aibridge.h"
