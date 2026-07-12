@@ -7,7 +7,7 @@
 # 说明：
 # - 不实际发布（无 token），仅验证跨平台构建 + 产出 artifact 供下载。
 # - cargo 用 Swatinem/rust-cache 缓存；npm 由 setup-node 缓存；gradle 由 setup-gradle 缓存。
-# - ubuntu-24.04-arm 提供 linux arm64 runner；macos-13 提供 macOS amd64 (Intel) runner。
+# - ubuntu-24.04-arm 提供 linux arm64 runner；macos-x64 runner 已弃用（24h 超时），仅保留 macos-arm64。
 
 name: CI
 
@@ -37,8 +37,6 @@ jobs:
             label: linux-arm64
           - os: macos-latest
             label: macos-arm64
-          - os: macos-13
-            label: macos-x64
           - os: windows-latest
             label: windows-x64
     steps:
@@ -89,7 +87,13 @@ jobs:
       - name: maturin build wheel
         shell: bash
         run: |
-          maturin build --manifest-path crates/aibridge-python/Cargo.toml --release $([ "${{ matrix.label }}" = "macos-universal2" ] && echo "--universal2")
+          if [ "${{ matrix.label }}" = "macos-universal2" ]; then
+            # universal2: maturin 分别编译 x86_64/aarch64-apple-darwin 后 lipo 合并
+            # （maturin 1.x 不支持 --universal2 标志，改用 --target universal2-apple-darwin）
+            maturin build --manifest-path crates/aibridge-python/Cargo.toml --release --target universal2-apple-darwin
+          else
+            maturin build --manifest-path crates/aibridge-python/Cargo.toml --release
+          fi
       - name: 上传 wheel 产物
         uses: actions/upload-artifact@v4
         with:
@@ -113,8 +117,6 @@ jobs:
             label: linux-arm64
           - os: macos-latest
             label: macos-arm64
-          - os: macos-13
-            label: macos-x64
           - os: windows-latest
             label: windows-x64
     steps:
@@ -177,7 +179,20 @@ jobs:
           go-version: '1.26'
           cache: false
       - name: 构建 libaibridge (ffi, release)
-        run: cargo build -p aibridge-ffi --release
+        shell: bash
+        run: |
+          if [ "${{ matrix.label }}" = "windows-x64" ]; then
+            # Windows: 用 GNU target 编译，避免 MSVC 产 .lib 与 Go MinGW gcc 链接不兼容
+            # （Go CGO 在 Windows 用 MinGW gcc；MSVC 运行时符号如 __chkstk 它找不到）
+            rustup target add x86_64-pc-windows-gnu
+            cargo build -p aibridge-ffi --release --target x86_64-pc-windows-gnu
+            # GNU target 产 libaibridge.dll.a（import lib）+ aibridge.dll，拷到 Go cgo 默认查找的 target/release
+            cp target/x86_64-pc-windows-gnu/release/libaibridge.dll.a target/release/ 2>/dev/null || \
+              cp target/x86_64-pc-windows-gnu/release/libaibridge.a target/release/ 2>/dev/null || true
+            cp target/x86_64-pc-windows-gnu/release/aibridge.dll target/release/ 2>/dev/null || true
+          else
+            cargo build -p aibridge-ffi --release
+          fi
       - name: go build + vet (CGO)
         shell: bash
         env:
