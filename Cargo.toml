@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/aibridge-core",
+    "crates/aibridge-ffi",
+    "crates/aibridge-python",
+    "crates/aibridge-node",
+]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+authors = ["WingkySky <wingky@example.com>"]
+repository = "https://github.com/WingkySky/aibridge"
+description = "AIBridge - 多模态 AI 统一接口 SDK（一套 API 调用所有 AI 模型）"
+
+[workspace.dependencies]
+# 内部 crate
+aibridge-core = { path = "crates/aibridge-core" }
+aibridge-ffi = { path = "crates/aibridge-ffi" }
+
+# 异步运行时
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+async-stream = "0.3"
+futures = "0.3"
+
+# HTTP 客户端
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "http2", "rustls-tls"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 错误处理
+thiserror = "1"
+
+# 日志追踪
+tracing = "0.1"
+
+# 工具
+once_cell = "1"
+bytes = "1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

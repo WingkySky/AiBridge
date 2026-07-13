@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    AIBridge .NET 绑定项目
+
+    通过 P/Invoke 调用 aibridge-ffi cdylib（libaibridge.{dylib,so,dll}）。
+    设计文档第 8 节：.NET 走 C ABI，FFI 阻塞调用用 Task 包装为原生异步，
+    流式用 IAsyncEnumerable<ChatCompletionChunk>。
+
+    配置说明：
+    - LibraryPath：libaibridge 动态库所在目录。本仓库默认产出在
+      $(RepoRoot)/target/debug（或 release）。运行时也可通过
+      AIBRIDGE_LIB_PATH 环境变量覆盖（见 Native.cs 的运行时解析逻辑）。
+    - 启用 PublishSingleFile / 自包含时，NuGet 打包会把动态库放进
+      runtimes/{rid}/native/（见设计文档 12.1，本阶段未实现打包）。
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AIBridge</RootNamespace>
+    <AssemblyName>AIBridge</AssemblyName>
+
+    <!-- 类库 + 可运行 hello world（Hello.cs 提供 Program Main） -->
+    <OutputType>Exe</OutputType>
+    <StartupObject>AIBridge.Hello</StartupObject>
+
+    <!-- 动态库搜索路径：默认指向仓库 target/debug -->
+    <LibraryPath>$(MSBuildThisFileDirectory)../../../target/debug</LibraryPath>
+  </PropertyGroup>
+
+  <!--
+    运行/构建时把 libaibridge 拷到输出目录，保证 dotnet run 能找到动态库。
+    NativeLibrary API 会先在输出目录、再在 LibraryPath / AIBRIDGE_LIB_PATH 找。
+  -->
+  <ItemGroup>
+    <None Include="$(LibraryPath)/libaibridge.dylib"
+          Condition="Exists('$(LibraryPath)/libaibridge.dylib')"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="libaibridge.dylib" />
+    <None Include="$(LibraryPath)/libaibridge.so"
+          Condition="Exists('$(LibraryPath)/libaibridge.so')"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="libaibridge.so" />
+    <None Include="$(LibraryPath)/aibridge.dll"
+          Condition="Exists('$(LibraryPath)/aibridge.dll')"
+          CopyToOutputDirectory="PreserveNewest"
+          Link="aibridge.dll" />
+  </ItemGroup>
+
+  <!--
+    NuGet 打包配置（设计文档 12.1）：动态库放进 runtimes/{rid}/native/，
+    .NET 运行时 NativeLibrary 自动按 RID 加载。脚本 build-dotnet.sh 负责把
+    libaibridge 拷到 runtimes/{rid}/native/，这里仅声明打包规则（通配包含）。
+  -->
+  <PropertyGroup>
+    <PackageId>AIBridge</PackageId>
+    <IsPackable>true</IsPackable>
+    <PackageVersion>2.0.0-alpha.1</PackageVersion>
+    <Description>AIBridge .NET 绑定（P/Invoke，直连 aibridge-ffi）</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes\" />
+  </ItemGroup>
+
+</Project>

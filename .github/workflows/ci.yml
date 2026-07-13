@@ -1,0 +1,267 @@
+# AIBridge CI 矩阵
+#
+# 对应设计文档第 12.3 节：平台（linux/macos/windows × amd64/arm64）× 语言。
+# 共 6 个 job：Rust 核心+ffi / Python / Node / Go / JVM / .NET。
+# 触发：push 到 feat/aibridge-rust-rewrite + 所有 PR。
+#
+# 说明：
+# - 不实际发布（无 token），仅验证跨平台构建 + 产出 artifact 供下载。
+# - cargo 用 Swatinem/rust-cache 缓存；npm 由 setup-node 缓存；gradle 由 setup-gradle 缓存。
+# - ubuntu-24.04-arm 提供 linux arm64 runner；macos-x64 runner 已弃用（24h 超时），仅保留 macos-arm64。
+
+name: CI
+
+on:
+  push:
+    branches: [feat/aibridge-rust-rewrite]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 3
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Rust 核心 + ffi（跨平台 build + test）
+  # ──────────────────────────────────────────────────────────────────────────
+  rust-core-ffi:
+    name: Rust 核心+ffi (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+          - os: macos-latest
+            label: macos-arm64
+          - os: windows-latest
+            label: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: cargo build（core + ffi）
+        run: cargo build -p aibridge-core -p aibridge-ffi
+      - name: cargo test（core + ffi）
+        run: cargo test -p aibridge-core -p aibridge-ffi
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Python 绑定（maturin build wheel）
+  #    macOS 产 universal2 wheel（同时含 amd64+arm64）
+  # ──────────────────────────────────────────────────────────────────────────
+  python-bindings:
+    name: Python wheel (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+          - os: macos-latest
+            label: macos-universal2
+          - os: windows-latest
+            label: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 添加 macOS universal2 交叉编译 target
+        if: matrix.label == 'macos-universal2'
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装 maturin
+        run: pip install maturin
+      - name: maturin build wheel
+        shell: bash
+        run: |
+          if [ "${{ matrix.label }}" = "macos-universal2" ]; then
+            # universal2: maturin 分别编译 x86_64/aarch64-apple-darwin 后 lipo 合并
+            # （maturin 1.x 不支持 --universal2 标志，改用 --target universal2-apple-darwin）
+            maturin build --manifest-path crates/aibridge-python/Cargo.toml --release --target universal2-apple-darwin
+          else
+            maturin build --manifest-path crates/aibridge-python/Cargo.toml --release
+          fi
+      - name: 上传 wheel 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-${{ matrix.label }}
+          path: target/wheels/*.whl
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. Node 绑定（napi build .node）
+  # ──────────────────────────────────────────────────────────────────────────
+  node-bindings:
+    name: Node .node (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+          - os: macos-latest
+            label: macos-arm64
+          - os: windows-latest
+            label: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/aibridge-node/package-lock.json
+      - name: npm install
+        run: |
+          cd crates/aibridge-node
+          npm install
+      - name: napi build
+        run: |
+          cd crates/aibridge-node
+          npx napi build --platform --release
+      - name: 上传 .node 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-binary-${{ matrix.label }}
+          path: crates/aibridge-node/*.node
+          if-no-files-found: warn
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Go 绑定（cargo build ffi + go build，CGO）
+  #    windows CGO 标记为 experimental（失败不阻断 CI）
+  # ──────────────────────────────────────────────────────────────────────────
+  go-bindings:
+    name: Go 绑定 (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+            experimental: false
+          - os: macos-latest
+            label: macos-arm64
+            experimental: false
+          - os: windows-latest
+            label: windows-x64
+            experimental: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false
+      - name: 构建 libaibridge (ffi, release)
+        shell: bash
+        run: |
+          if [ "${{ matrix.label }}" = "windows-x64" ]; then
+            # Windows: 用 GNU target 编译，避免 MSVC 产 .lib 与 Go MinGW gcc 链接不兼容
+            # （Go CGO 在 Windows 用 MinGW gcc；MSVC 运行时符号如 __chkstk 它找不到）
+            rustup target add x86_64-pc-windows-gnu
+            cargo build -p aibridge-ffi --release --target x86_64-pc-windows-gnu
+            # GNU target 产 libaibridge.dll.a（import lib）+ aibridge.dll，拷到 Go cgo 默认查找的 target/release
+            cp target/x86_64-pc-windows-gnu/release/libaibridge.dll.a target/release/ 2>/dev/null || \
+              cp target/x86_64-pc-windows-gnu/release/libaibridge.a target/release/ 2>/dev/null || true
+            cp target/x86_64-pc-windows-gnu/release/aibridge.dll target/release/ 2>/dev/null || true
+          else
+            cargo build -p aibridge-ffi --release
+          fi
+      - name: go build + vet (CGO)
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          LIBAIBRIDGE_DIR: ${{ github.workspace }}/target/release
+        run: |
+          cd bindings/go
+          case "$(uname -s)" in
+            Darwin) export DYLD_LIBRARY_PATH="$LIBAIBRIDGE_DIR" ;;
+            Linux)  export LD_LIBRARY_PATH="$LIBAIBRIDGE_DIR" ;;
+          esac
+          go build ./...
+          go vet ./...
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. JVM 绑定（cargo build ffi + gradle build，动态库打进 jar）
+  # ──────────────────────────────────────────────────────────────────────────
+  jvm-bindings:
+    name: JVM 绑定 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 安装 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: 构建 libaibridge (ffi, release)
+        run: cargo build -p aibridge-ffi --release
+      - name: gradle build（含 native 进 jar）
+        shell: bash
+        run: |
+          cd bindings/jvm
+          ./gradlew build -PembedNative=true
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6. .NET 绑定（cargo build ffi + dotnet build，动态库打进 NuGet）
+  # ──────────────────────────────────────────────────────────────────────────
+  dotnet-bindings:
+    name: .NET 绑定 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: 构建 libaibridge (ffi, release)
+        run: cargo build -p aibridge-ffi --release
+      - name: dotnet build
+        shell: bash
+        run: |
+          cd bindings/dotnet/AIBridge
+          dotnet build

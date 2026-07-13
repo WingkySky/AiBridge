@@ -1,0 +1,24 @@
+[package]
+name = "aibridge-node"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.77"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AIBridge Node.js 绑定（napi-rs，直连 aibridge-core，原生 Promise）"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+aibridge-core.workspace = true
+# napi: 启用 tokio_rt（async fn → Promise）+ napi8（ThreadsafeFunction 等）+ serde-json（serde_json::Value 互转）
+napi = { version = "2", features = ["napi8", "tokio_rt", "serde-json"] }
+napi-derive = "2"
+tokio.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+napi-build = "2"

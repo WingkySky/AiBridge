@@ -1,0 +1,37 @@
+[package]
+name = "aibridge-python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "AIBridge Python 绑定（PyO3，直连 aibridge-core，原生 asyncio）"
+
+[lib]
+crate-type = ["cdylib"]
+# lib name 用 `_aibridge`（而非 `aibridge`）以避免与 aibridge-ffi 的
+# `libaibridge.dylib` 产物冲突：两者 `[lib] name` 都为 `aibridge` 时，`cargo build`
+# 会把 cdylib 都输出到 target/debug/libaibridge.dylib 互相覆盖，导致 `maturin develop`
+# 后 dylib 变成 PyO3 版本（无 C FFI 符号），Go/JVM 链接失败。
+#
+# Python import 名由 `#[pymodule] fn aibridge` 决定（见 src/lib.rs），与 lib name 无关，
+# 故改 lib name 不影响 `import aibridge`。下划线前缀是 Python C 扩展惯例。
+name = "_aibridge"
+
+[dependencies]
+aibridge-core.workspace = true
+# PyO3 0.28 原生支持 async fn（需 experimental-async feature），不再需要 pyo3-asyncio。
+#
+# `extension-module` feature 不在此处启用：它会让 `cargo build` 因不链接 Python
+# 动态库而失败（扩展模块符号由 Python 进程运行时提供）。改由 pyproject.toml 的
+# `[tool.maturin] features = ["pyo3/extension-module"]` 在 maturin 构建时启用，
+# 这样 `cargo build -p aibridge-python` 能正常链接 Python 框架，maturin 产物正确。
+pyo3 = { version = "0.28", features = [
+    "abi3-py310",
+    "experimental-async",
+] }
+tokio = { workspace = true, features = ["rt-multi-thread", "rt", "sync"] }
+futures.workspace = true
+serde_json.workspace = true
+once_cell.workspace = true
