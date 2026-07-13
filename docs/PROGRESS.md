@@ -17,10 +17,10 @@
 
 | 文档 | 路径 | 内容 |
 |---|---|---|
-| 设计文档 | [docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md](superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md) | 架构、数据模型、FFI 边界、异步桥接、错误处理、适配器迁移策略 |
-| 实现计划 | [docs/superpowers/plans/2026-07-07-aibridge-implementation-plan.md](superpowers/plans/2026-07-07-aibridge-implementation-plan.md) | 阶段 0-3 任务分解、多 agent 编排策略、里程碑 |
+| 设计文档 | [docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md](design.md) | 架构、数据模型、FFI 边界、异步桥接、错误处理、适配器迁移策略 |
+| 实现计划 | [docs/superpowers/plans/2026-07-07-aibridge-implementation-plan.md](plan.md) | 阶段 0-3 任务分解、多 agent 编排策略、里程碑 |
 | 迁移指南 | [docs/migration-guide.md](migration-guide.md) | Python v1（agn-sdk）→ v2（aibridge）破坏性升级对照与示例 |
-| v2 README | [README_aibridge.md](../README_aibridge.md) | 五语言快速开始 + provider 列表 |
+| v2 README | [README_aibridge.md](index.md) | 五语言快速开始 + provider 列表 |
 | 本进度文档 | docs/PROGRESS.md | 当前进度 + 接手指南（本文档） |
 
 ## 3. 架构概览
@@ -115,7 +115,7 @@ aibridge/
 
 ### ⏳ 阶段 3：发布收尾（进行中）
 - [x] Python v1→v2 迁移指南（[docs/migration-guide.md](migration-guide.md)）
-- [x] v2 README（[README_aibridge.md](../README_aibridge.md)）
+- [x] v2 README（[README_aibridge.md](index.md)）
 - [x] 进度文档更新（本文档）
 - [ ] CI 矩阵（平台 × 语言，交叉编译）
 - [ ] 五语言包发布（PyPI `aibridge` / npm `aibridge` / Maven `io.aibridge:aibridge` / NuGet `AIBridge` / Go module `aibridge-go`）

@@ -1,0 +1,101 @@
+# AIBridge 文档网站配置
+#
+# 主题：mkdocs-material（中文界面）
+# 部署：GitHub Pages  https://wingkysky.github.io/AGN-SDK/
+# 构建：.github/workflows/docs.yml
+
+site_name: AIBridge
+site_description: 跨语言 AI 统一接口 SDK —— 一套 API 调用所有 AI 模型（Rust 核心 + Python/JS-TS/Go/JVM/.NET 五语言原生绑定）
+site_url: https://wingkysky.github.io/AGN-SDK/
+repo_url: https://github.com/WingkySky/AGN-SDK
+repo_name: WingkySky/AGN-SDK
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# 排除不纳入网站的文档：
+#   - 0[1-5]-*.md：Python v1 旧文档（归档参考，与 v2 无关）
+#   - superpowers/：原始 spec/plan（已复制为 docs/design.md 与 docs/plan.md，原文件保留在 git）
+exclude_docs: |
+  0[1-5]-*.md
+  superpowers/
+
+theme:
+  name: material
+  language: zh
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到浅色模式
+  icon:
+    logo: material/bridge
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+      toc_depth: 3
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+
+nav:
+  - 首页: index.md
+  - 迁移指南: migration-guide.md
+  - 设计文档: design.md
+  - 实现计划: plan.md
+  - 进度文档: PROGRESS.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/WingkySky/AGN-SDK
