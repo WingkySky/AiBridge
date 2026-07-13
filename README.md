@@ -1,436 +1,410 @@
-# 🤖 AGN-SDK
+# AIBridge
 
-[![Stars](https://img.shields.io/github/stars/your-org/agn-sdk?style=flat)](https://github.com/)
-[![Forks](https://img.shields.io/github/forks/your-org/agn-sdk?style=flat)](https://github.com/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![Python](https://img.shields.io/badge/-Python-3776AB?logo=python&logoColor=white)
-![Async](https://img.shields.io/badge/-Async-00-stroke?logo=asyncio&logoColor=white)
+> 跨语言 AI 统一接口 SDK —— 一套 API 调用所有 AI 模型。
+> Rust 核心 + Python / JS-TS / Go / JVM / .NET 五语言原生绑定。
 
-> **Unified API** | **5+ Providers** | **Async-First** | **Production-Ready** | **Type-Safe**
+[![状态](https://img.shields.io/badge/状态-阶段3发布收尾中-yellow)](docs/PROGRESS.md)
+[![provider](https://img.shields.io/badge/provider-38+-blue)](#支持的-provider)
+[![核心测试](https://img.shields.io/badge/core%20单测-1448-brightgreen)](docs/PROGRESS.md)
 
----
+AIBridge（原名 agn-sdk）是多模态 AI 统一接口 SDK：文本对话（chat）、图像生成（image）、视频生成（video）、文字转语音（TTS）、语音转文字（ASR）、文本嵌入（embed），一套 API 调用 38+ 个 AI provider。
 
-<div align="center">
+- **五语言原生 import**：Python / JS-TS / Go / JVM(Java,Kotlin) / .NET(C#) 直接调用同一套能力
+- **Rust 核心**：无 GIL、原生 async、零成本抽象，IO 密集场景高性能
+- **38+ provider**：OpenAI / Claude / Gemini / 通义千问 / 智谱 / 文心一言 / DeepSeek / 火山引擎 / Stability / Runway / Pika / 可灵 / Edge-TTS / ElevenLabs / Deepgram …
+- **六大能力**：chat（含流式）/ image / video / TTS / ASR / embed
+- **免认证 provider**：edge-tts 免费 TTS，无需 API key
 
-**🌐 Language / 语言**
-
-[**English**](README.md) | [中文](README_zh.md)
-
-</div>
-
----
-
-**A unified SDK that calls all AI models through one API — whether it's text chat, image generation, video creation, or speech synthesis.**
-
-Built with async-first design, full type safety, and a pluggable adapter architecture. If you're familiar with the OpenAI API, you can use AGN-SDK immediately.
+> **v2 是破坏性升级**。若你已在用 Python v1（`agn-sdk`），请参阅 [迁移指南](docs/migration-guide.md)。
 
 ---
 
-## ✨ Features
+## 目录
 
-### Capabilities
-
-| Capability | Description | Status |
-| ----------- | ----------- | ------ |
-| 💬 **Chat Completion** | Multi-turn conversations with AI models | ✅ Stable |
-| 🖼️ **Image Generation** | Text-to-image generation | ✅ Stable |
-| 🎬 **Video Creation** | Async video generation with polling | ✅ Stable |
-| 🔊 **Speech Synthesis** | Text-to-speech generation (Edge TTS / ElevenLabs / Cartesia) | ✅ Stable |
-| 🎤 **Speech Recognition** | Audio transcription (Deepgram / AssemblyAI) | ✅ Stable |
-| 📊 **Embeddings** | Text embedding vectors (OpenAI / Gemini / Agnes / aggregators) | ✅ Stable |
-
-### Architecture Highlights
-
-- **Unified Interface** — One API to rule all AI providers (OpenAI, Azure, Anthropic, Gemini, etc.)
-- **Async-First Design** — Full async/await support, built on `httpx` and `anyio`
-- **Adapter Pattern** — Add new providers by implementing a single adapter class
-- **Type Safety** — All data models defined with Pydantic v2, full type hints throughout
-- **Production-Ready** — Built-in retry logic, error mapping, parameter normalization
-- **OpenAI Compatible** — Use OpenAI API patterns directly, minimal learning curve
+- [架构](#架构)
+- [支持的 provider](#支持的-provider)
+- [五语言快速开始](#五语言快速开始)
+  - [Python](#python)
+  - [Node.js / TypeScript](#nodejs--typescript)
+  - [Go](#go)
+  - [Java / Kotlin (JVM)](#java--kotlin-jvm)
+  - [C# / .NET](#c--net)
+- [安装](#安装)
+- [能力一览](#能力一览)
+- [相关文档](#相关文档)
 
 ---
 
-## 📦 Supported Providers
-
-### V1.0 (Stable)
-
-| Provider | Chat | Image | Video | Base URL |
-|----------|------|-------|-------|----------|
-| **Agnes AI** | ✅ | ✅ | ✅ | `https://api.agnes.ai/v1` |
-| **OpenAI** | ✅ | ✅ | — | `https://api.openai.com/v1` |
-| **Azure OpenAI** | ✅ | ✅ | — | Azure endpoint |
-
-### V1.1+ (Coming Soon)
-
-| Provider | Chat | Image | Video |
-|----------|------|-------|-------|
-| Anthropic (Claude) | ✅ | — | — |
-| Google Gemini | ✅ | ✅ | — |
-| Runway | — | — | ✅ |
-| Pika | — | — | ✅ |
-| Stability AI | — | ✅ | — |
-| ByteDance Seedance | ✅ | ✅ | ✅ |
-
-### Audio & Embedding Providers (Stable)
-
-| Provider | TTS | ASR | Embed | Notes |
-|----------|-----|-----|-------|-------|
-| **Edge TTS** | ✅ | — | — | Free, no API key, 100+ neural voices |
-| **ElevenLabs** | ✅ | — | — | High-quality multilingual voices |
-| **Cartesia** | ✅ | — | — | Ultra-low-latency Sonic TTS |
-| **Deepgram** | — | ✅ | — | Nova-2/Nova-3, fastest ASR |
-| **AssemblyAI** | — | ✅ | — | Enterprise ASR with diarization |
-| **OpenAI** | — | — | ✅ | text-embedding-3-small/large |
-| **Google Gemini** | — | — | ✅ | gemini-embedding-001 |
-| **Agnes AI** | — | — | ✅ | Unified embeddings |
-| **SiliconFlow / Together / Fireworks / Cloudflare** | — | — | ✅ | Aggregator-hosted embedding models |
-
----
-
-## 📦 Project Structure
+## 架构
 
 ```
-agn-sdk/
-├── agn/                              # SDK core code
-│   ├── __init__.py                   # SDK entry point
-│   ├── client.py                     # Unified client (API layer)
-│   ├── router.py                     # Router (routing layer)
-│   ├── adapters/                     # Adapter implementations
-│   │   ├── base.py                   # BaseAdapter abstract class
-│   │   ├── factory.py                # Adapter factory
-│   │   ├── agnes.py                  # Agnes AI adapter
-│   │   ├── openai.py                 # OpenAI adapter
-│   │   ├── azure.py                  # Azure OpenAI adapter
-│   │   └── ...                       # More adapters
-│   ├── core/                         # Core utilities
-│   │   ├── http_client.py            # Async HTTP client
-│   │   ├── retry.py                  # Retry mechanism
-│   │   ├── errors.py                 # Error definitions
-│   │   ├── config.py                 # Configuration
-│   │   └── utils.py                  # Utilities
-│   └── models/                       # Pydantic data models
-│       ├── common.py                 # Common structures
-│       ├── chat.py                   # Chat models
-│       ├── image.py                  # Image models
-│       ├── video.py                  # Video models
-│       └── options.py                # Unified options
-├── docs/                             # Documentation
-│   ├── 01-overview.md                # Project overview
-│   ├── 02-architecture.md            # Architecture design
-│   └── 03-api-reference.md           # API reference
-├── tests/                            # Test suite
-├── examples/                         # Usage examples
-├── pyproject.toml                    # Project config
-└── README.md                         # Project docs (English)
+                    aibridge-core  (Rust, 纯 async 逻辑)
+                  ┌──────────┴──────────┐
+        直连(原生async)              C ABI (aibridge-ffi cdylib)
+        ┌─────┴─────┐            ┌─────┬─────┬─────┐
+   aibridge-    aibridge-     aibridge- aibridge- aibridge-
+   python       node          go       jvm       dotnet
+   (PyO3)       (napi-rs)     (CGO)    (JNA)     (P/Invoke)
+   asyncio      Promise/      goroutine CompletableFuture Task/
+   AsyncIter    AsyncIter     +channel  /Flow      IAsyncEnum
 ```
+
+- **Python / JS-TS 直连 Rust 核心**：PyO3 / napi-rs 直连 `aibridge-core`，无 JSON 序列化边界，享真正原生 async。
+- **Go / JVM / .NET 走 C ABI**：通过 `aibridge-ffi` 的 C ABI（句柄 + JSON 边界 + 全局 tokio runtime），各语言用原生异步原语包装。
+- **五种语言共享同一个 Rust 核心**，绑定层都薄，行为一致。
+
+详见 [设计文档](docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md)。
 
 ---
 
-## 🚀 Quick Start
+## 支持的 provider
 
-Get started in 3 steps:
+共 **38 个真实 provider + 1 个 mock**（echo，测试用），按类别：
 
-### Step 1: Install
+| 类别 | provider |
+|---|---|
+| **MVP** | `openai` `agnes` `volcengine_cv`（火山引擎） `gemini` |
+| **OpenAI 兼容族** | `azure` `siliconflow`（别名 `sf`） `togetherai`（`together`） `fireworksai`（`fireworks`） `cloudflareai`（`cloudflare` / `workersai`） |
+| **扩展模型** | `grok`（`xaigrok`） `yi`（`lingyiwanwu`） `sensenova`（`shangtang`） `hunyuan`（`tencent_hunyuan`） `groq` |
+| **更多模型** | `deepseek` `stepfun`（`step`） `mistral` `cohere` `perplexity` |
+| **新兴模型** | `ideogram`（`ideo`） `luma`（`dream-machine` / `lumalabs`） `llama`（`meta-llama` / `meta`） |
+| **中文模型** | `qwen`（通义千问） `zhipu`（智谱） `doubao`（豆包） `ernie`（文心一言） `kimi` `minimax` |
+| **独立协议** | `anthropic`（Claude） `stability`（Stability AI） `runway` `pika` `kling`（可灵） |
+| **音频 TTS** | `edge-tts`（免费，免认证，别名 `edge_tts` / `edge`） `elevenlabs`（`eleven` / `11labs`） `cartesia`（`sonic`） |
+| **音频 ASR** | `deepgram`（`dg`） `assemblyai`（`assembly` / `aai`） |
+| **Mock** | `echo`（免认证，测试用，不调网络） |
 
-```bash
-# From PyPI (coming soon)
-pip install agn-sdk
+---
 
-# Or install from source (development mode)
-git clone https://github.com/your-org/agn-sdk.git
-cd agn-sdk
-pip install -e .
-```
+## 五语言快速开始
 
-### Step 2: Configure API Key
+下面每个示例都用 **`echo` 适配器**（免认证、不调网络），可直接运行验证管线。真实使用时把 `provider="echo"` 换成 `provider="openai"` 等并传入 `api_key`。
 
-```bash
-# Option A — Environment variable (Recommended)
-export AGN_API_KEY='your-api-key'
-export AGN_BASE_URL='https://api.agnes.ai/v1'  # Provider-specific base URL
-
-# Option B — .env file (auto-loaded)
-echo "AGN_API_KEY=your-api-key" > .env
-echo "AGN_BASE_URL=https://api.agnes.ai/v1" >> .env
-
-# Option C — Pass via code
-client = Client(provider="agnes", api_key="your-key", base_url="https://api.agnes.ai/v1")
-```
-
-### Step 3: Call AI Models
+### Python
 
 ```python
 import asyncio
-from agn import Client
+from aibridge import Client
 
 async def main():
-    # Create client
-    client = Client(
-        provider="agnes",
-        api_key="your-api-key",
-        base_url="https://api.agnes.ai/v1",
+    # echo 免认证；真实用例：Client(provider="openai", api_key="sk-xxx")
+    client = Client(provider="echo")
+    await client.start()
+
+    # 文本对话
+    resp = await client.chat(
+        model="echo-chat",
+        messages=[{"role": "user", "content": "你好"}],
     )
-    
-    # 💬 Chat Completion
-    response = await client.chat(
-        model="claude-3-opus",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "Hello!"}
-        ],
-        temperature=0.7,
+    print(resp.choices[0].message.content)  # "你好 [echo]"
+
+    # 流式对话
+    stream = await client.chat_stream(
+        model="echo-chat",
+        messages=[{"role": "user", "content": "你好"}],
     )
-    print(response.choices[0].message.content)
-    
-    # 🖼️ Image Generation
-    result = await client.image_generate(
-        model="dall-e-3",
-        prompt="A beautiful sunset over the ocean",
-        size="1024x1024",
-        quality="hd",
-    )
-    print(result.data[0].url)
-    
-    # 🎬 Video Creation (async with polling)
-    task = await client.video_create(
-        model="video-gen-1",
-        prompt="A cat walking in the garden",
-        width=1280,
-        height=720,
-        num_frames=121,
-    )
-    
-    # Poll video status until complete
-    while True:
-        status = await client.video_poll(task.task_id)
-        print(f"Status: {status.status}, Progress: {status.progress}%")
-        if status.status in ("completed", "failed"):
-            break
-    
-    print(f"Video URL: {status.video_url}")
+    async for chunk in stream:
+        print(chunk.choices[0].content, end="", flush=True)
+    print()
 
-if __name__ == "__main__":
-    asyncio.run(main())
+    # 文字转语音
+    audio = await client.speech(model="echo-tts", input="你好", voice="alloy")
+    print(f"音频 {len(audio.audio_data)} 字节")
+
+    await client.close()
+
+asyncio.run(main())
 ```
 
-✨ **That's it!** You now have a unified interface to all supported AI providers.
-
----
-
-## 📖 Complete Usage Reference
-
-### Chat Completion
-
-```python
-response = await client.chat(
-    model="gpt-4o",
-    messages=[
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Explain quantum computing in simple terms."}
-    ],
-    temperature=0.7,        # Randomness (0.0-2.0)
-    max_tokens=1000,        # Max response tokens
-    top_p=1.0,              # Nucleus sampling
-    frequency_penalty=0.0,   # Repetition penalty
-    presence_penalty=0.0,    # Topic diversity
-    stream=False,            # Streaming response
-)
-print(response.choices[0].message.content)
-```
-
-### Image Generation
-
-```python
-result = await client.image_generate(
-    model="dall-e-3",
-    prompt="A futuristic city with flying cars",
-    size="1024x1024",       # 1024x1024, 1024x1792, 1792x1024
-    quality="hd",           # standard or hd
-    style="vivid",          # vivid or natural (DALL-E 3)
-    n=1,                    # Number of images
-)
-print(result.data[0].url)   # or result.data[0].b64_json
-```
-
-### Video Creation
-
-```python
-# Create video task
-task = await client.video_create(
-    model="video-gen-1",
-    prompt="A dramatic sword fight scene",
-    width=1280,
-    height=720,
-    num_frames=121,         # Must satisfy 8n+1 (e.g., 33, 49, 81, 121, 241)
-    frame_rate=24,
-    seed=42,                # Optional: for reproducibility
-)
-print(f"Task ID: {task.task_id}")
-
-# Poll until complete
-status = await client.video_poll(task.task_id)
-while status.status == "in_progress":
-    await asyncio.sleep(5)
-    status = await client.video_poll(task.task_id)
-    
-print(f"Video URL: {status.video_url}")
-```
-
-### Speech Synthesis (TTS)
-
-```python
-# Edge TTS — free, no API key required (install: pip install agn-sdk[edge-tts])
-edge_client = Client(provider="edge-tts", api_key="")
-result = await edge_client.speech(
-    model="edge-tts",
-    input="Hello, this is synthesized speech.",
-    voice="xiaoxiao",          # short name or full ID: zh-CN-XiaoxiaoNeural
-    response_format="mp3",     # mp3 / wav / ogg / pcm
-    rate="+10%",               # optional: speed adjustment
-)
-with open("out.mp3", "wb") as f:
-    f.write(result.audio_data)
-
-# OpenAI TTS — uses alloy/echo/nova voices
-result = await client.speech(
-    model="tts-1",
-    input="The quick brown fox jumps over the lazy dog.",
-    voice="alloy",
-    response_format="mp3",
-    speed=1.0,
-)
-```
-
-### Speech Recognition (ASR)
-
-```python
-# Deepgram Nova-2 (fastest) — accepts file path / URL / bytes / base64
-result = await client.transcribe(
-    model="nova-2",
-    file="./meeting.wav",
-    language="zh",             # optional: auto-detected if omitted
-    smart_format=True,         # optional: punctuation + number formatting
-)
-print(result.text)
-for seg in result.segments or []:
-    print(f"[{seg.start:.2f}-{seg.end:.2f}] {seg.text}")
-
-# AssemblyAI — enterprise ASR with speaker diarization
-result = await client.transcribe(
-    model="best",
-    file="./interview.mp3",
-    speaker_labels=True,
-    sentiment_analysis=True,
-)
-```
-
-### Text Embeddings
-
-```python
-# Single text or batch — returns unified EmbeddingResult
-result = await client.embed(
-    model="text-embedding-3-small",
-    input=["hello world", "machine learning"],
-)
-vectors = result.get_embeddings()   # list[list[float]]
-print(len(vectors), len(vectors[0]))
-```
-
----
-
-## 🏗️ Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    API Layer (Client)                   │
-│            chat() / image_generate() / video_create()   │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Router Layer                           │
-│          Model routing, load balancing, fallback        │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                 Adapter Layer                           │
-│    BaseAdapter → AgnesAdapter / OpenAIAdapter / ...     │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                   Core Layer                            │
-│      HTTP client, retry, errors, config, utils          │
-└─────────────────────────────────────────────────────────┘
-```
-
-- **API Layer** — Unified `Client` class, user-facing interface
-- **Router Layer** — Model selection, routing, load balancing
-- **Adapter Layer** — Provider-specific implementations, parameter mapping, response normalization
-- **Core Layer** — Shared utilities (HTTP, retry, errors, config)
-
----
-
-## 📋 Adapter Development
-
-Adding a new AI provider is straightforward:
-
-1. **Create adapter** — Inherit `BaseAdapter`, implement required methods
-2. **Register factory** — Call `AdapterFactory.register("provider_name", YourAdapter)`
-3. **Declare capabilities** — Set `supported_capabilities` list
-
-```python
-from agn.adapters.base import BaseAdapter
-from agn.adapters.factory import AdapterFactory
-
-class NewProviderAdapter(BaseAdapter):
-    provider_type = "newprovider"
-    provider_name = "New Provider"
-    supported_capabilities = [Capabilities.CHAT, Capabilities.IMAGE_GENERATE]
-    
-    async def start(self) -> None:
-        # Initialize HTTP client
-        ...
-    
-    async def chat(self, model: str, messages: list[ChatMessage], **kwargs):
-        # Implement chat logic
-        ...
-    
-    # ... implement other methods
-
-AdapterFactory.register("newprovider", NewProviderAdapter)
-```
-
----
-
-## 🧪 Development
+运行：
 
 ```bash
-# Clone and setup
-git clone https://github.com/your-org/agn-sdk.git
-cd agn-sdk
-python -m venv venv
-source venv/bin/activate
+pip install maturin
+maturin develop -m crates/aibridge-python/Cargo.toml
+python examples/hello_python.py
+```
 
-# Install with dev dependencies
-pip install -e ".[dev]"
+### Node.js / TypeScript
 
-# Run tests
-pytest
+```javascript
+const { Client } = require('./crates/aibridge-node');
 
-# Code formatting
-black agn/
+async function main() {
+  // echo 免认证；真实用例：new Client('openai', { apiKey: 'sk-xxx' })
+  const client = new Client('echo', {});
+  await client.start();
 
-# Linting
-ruff check agn/
+  // 文本对话
+  const resp = await client.chat({
+    model: 'echo-chat',
+    messages: [{ role: 'user', content: '你好' }],
+  });
+  console.log(resp.choices[0].message.content); // "你好 [echo]"
 
-# Type checking
-mypy agn/
+  // 流式对话
+  const stream = await client.chatStream({
+    model: 'echo-chat',
+    messages: [{ role: 'user', content: '你好' }],
+  });
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0];
+    if (delta.content) process.stdout.write(delta.content);
+  }
+  console.log();
+
+  // 文字转语音
+  const audio = await client.speech({
+    model: 'echo-tts',
+    input: '你好',
+    voice: 'alloy',
+  });
+  console.log(`音频 ${audio.audioData.length} 字节`);
+
+  await client.close();
+}
+
+main();
+```
+
+运行：
+
+```bash
+cd crates/aibridge-node && npm install && napi build && cd ../..
+node examples/hello_node.js
+```
+
+### Go
+
+```go
+package main
+
+import (
+	"fmt"
+
+	aibridge "github.com/aibridge/aibridge-go"
+)
+
+func main() {
+	// echo 免认证；真实用例：aibridge.NewClient("openai", &aibridge.ClientOpts{ApiKey: "sk-xxx"})
+	client, err := aibridge.NewClient("echo", nil)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+	client.Start()
+
+	// 文本对话
+	chatReq := &aibridge.ChatRequest{
+		Model:    "echo-chat",
+		Messages: []aibridge.ChatMessage{aibridge.NewUserTextMessage("你好")},
+	}
+	resp, err := client.Chat(chatReq)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(resp.Choices[0].Message.Content) // "你好 [echo]"
+
+	// 流式对话
+	stream, err := client.ChatStream(chatReq)
+	if err != nil {
+		panic(err)
+	}
+	for chunk := range stream.Ch() {
+		if len(chunk.Choices) > 0 {
+			fmt.Print(chunk.Choices[0].Delta.Content)
+		}
+	}
+	fmt.Println()
+
+	// 文字转语音
+	speechReq := &aibridge.SpeechRequest{
+		Model: "echo-tts",
+		Input: "你好",
+		Voice: aibridge.SingleVoice("alloy"),
+	}
+	speech, err := client.Speech(speechReq)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("音频 %d 字节\n", len(speech.AudioData))
+}
+```
+
+运行：
+
+```bash
+cargo build -p aibridge-ffi
+cd bindings/go
+CGO_ENABLED=1 DYLD_LIBRARY_PATH=../../target/debug go run ./example
+```
+
+### Java / Kotlin (JVM)
+
+```java
+package io.aibridge;
+
+import java.util.List;
+
+public class Hello {
+    public static void main(String[] args) {
+        // echo 免认证；真实用例：new Client("openai", "sk-xxx")
+        try (Client client = new Client("echo")) {
+            client.start();
+
+            // 文本对话
+            ChatRequest req = ChatRequest.builder(
+                    "echo-chat",
+                    List.of(ChatMessage.user("你好")))
+                .build();
+            ChatCompletion resp = client.chat(req);
+            System.out.println(resp.choices.get(0).message.content); // "你好 [echo]"
+
+            // 流式对话
+            ChatRequest streamReq = ChatRequest.builder(
+                    "echo-chat",
+                    List.of(ChatMessage.user("你好")))
+                .stream(true)
+                .build();
+            try (ChatStream stream = client.chatStream(streamReq)) {
+                while (stream.hasNext()) {
+                    ChatCompletionChunk chunk = stream.next();
+                    String c = chunk.firstDeltaContent();
+                    if (c != null) System.out.print(c);
+                }
+            }
+            System.out.println();
+
+            // 文字转语音
+            SpeechRequest speechReq = SpeechRequest.builder("echo-tts", "你好", "alloy").build();
+            SpeechResultFull audio = client.speech(speechReq);
+            System.out.println("音频 " + audio.audioLength() + " 字节");
+        }
+    }
+}
+```
+
+运行：
+
+```bash
+cd bindings/jvm && ./gradlew run
+```
+
+### C# / .NET
+
+```csharp
+using AIBridge;
+
+// echo 免认证；真实用例：new Client("openai", "sk-xxx")
+using var client = new Client("echo");
+client.Start();
+
+// 文本对话
+var chatReq = new ChatRequest("echo-chat", new[]
+{
+    ChatMessage.User("你好"),
+});
+ChatCompletion resp = client.Chat(chatReq);
+Console.WriteLine(resp.Choices[0].Message.Content); // "你好 [echo]"
+
+// 流式对话
+int chunkCount = 0;
+var assembled = new System.Text.StringBuilder();
+await foreach (ChatCompletionChunk chunk in client.ChatStreamAsync(chatReq))
+{
+    chunkCount++;
+    if (chunk.Choices.Count > 0 && chunk.Choices[0].Delta.Content != null)
+        assembled.Append(chunk.Choices[0].Delta.Content);
+}
+Console.WriteLine(assembled.ToString());
+
+// 文字转语音
+var speechReq = new SpeechRequest("echo-tts", "你好", "alloy");
+SpeechResult audio = client.Speech(speechReq);
+Console.WriteLine($"音频 {audio.AudioData.Length} 字节");
+```
+
+运行：
+
+```bash
+cargo build -p aibridge-ffi
+cd bindings/dotnet && dotnet run
 ```
 
 ---
 
-## 📜 License
+## 安装
 
-MIT License
+> 阶段 3 发布进行中，以下为各语言的目标安装方式。发布前可从源码构建。
+
+| 语言 | 安装命令 | 包名 |
+|---|---|---|
+| Python | `pip install aibridge` | PyPI `aibridge` |
+| Node.js | `npm install aibridge` | npm `aibridge` |
+| Go | `go get github.com/aibridge/aibridge-go`（需单独装 libaibridge） | Go module `aibridge-go` |
+| JVM | Maven `io.aibridge:aibridge` | Maven Central |
+| .NET | `dotnet add package AIBridge` | NuGet `AIBridge` |
+
+从源码构建（开发/发布前）：
+
+```bash
+# Rust 核心 + ffi
+cargo build --workspace
+
+# Python 绑定
+pip install maturin
+maturin develop -m crates/aibridge-python/Cargo.toml
+
+# Node 绑定
+cd crates/aibridge-node && npm install && napi build
+
+# Go / JVM / .NET 绑定需先 cargo build -p aibridge-ffi 产 libaibridge 动态库
+```
+
+---
+
+## 能力一览
+
+| 能力 | 方法 | 说明 |
+|---|---|---|
+| 文本对话 | `chat` | 支持多轮、system/user/assistant/tool、多模态、工具调用 |
+| 流式对话 | `chat_stream` | 原生异步迭代器，逐块产出 |
+| 图像生成 | `image_generate` | 文生图、图生图（reference_images）、局部重绘（mask） |
+| 视频生成 | `video_create` + `video_poll` | 文生视频、图生视频，任务轮询 |
+| 文字转语音 | `speech` | TTS，支持音色候选列表自动降级 |
+| 语音转文字 | `transcribe` | ASR，支持文件路径/URL/bytes/base64 输入 |
+| 文本嵌入 | `embed` | 文本向量化 |
+| 模型列表 | `list_models` | 实时拉取 provider 可用模型 |
+| 音色列表 | `list_voices` / `recommend_voices` | 音色健康检查/推荐/自动降级 |
+
+### 错误处理
+
+统一错误基类 `AibridgeError`，子类按错误性质分类（各语言异常名一致）：
+
+- `AuthenticationError` 认证失败
+- `RateLimitError` 限流（含 `retry_after`）
+- `ValidationError` 参数校验
+- `ModelNotFoundError` 模型不存在
+- `APIError` Provider API 错误
+- `NetworkError` 网络错误
+- `TimeoutError` 超时
+- `UnsupportedCapabilityError` 能力不支持
+- `ProviderNotFoundError` provider 不存在
+- `VoiceNotAvailableError` 音色不可用
+- `ServiceUnavailableError` 服务暂不可用（可重试）
+
+错误带稳定 `code`（snake_case，如 `rate_limit_error`）与 `retryable` 标识，便于业务层重试决策。
+
+---
+
+## 相关文档
+
+- [设计文档](docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md) — 架构、数据模型、FFI 边界、异步桥接、错误处理、适配器迁移策略
+- [迁移指南](docs/migration-guide.md) — Python v1（agn-sdk）→ v2（aibridge）破坏性升级对照与示例
+- [进度文档](docs/PROGRESS.md) — 当前实施进度与接手指南
+- [原 README（v1）](README_v1.md) — Python v1 文档（归档参考）
+
+---
+
+## License
+
+同仓库主 LICENSE。
