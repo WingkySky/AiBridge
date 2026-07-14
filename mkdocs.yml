@@ -7,8 +7,8 @@
 site_name: AIBridge
 site_description: 跨语言 AI 统一接口 SDK —— 一套 API 调用所有 AI 模型（Rust 核心 + Python/JS-TS/Go/JVM/.NET 五语言原生绑定）
 site_url: https://wingkysky.github.io/AGN-SDK/
-repo_url: https://github.com/WingkySky/AGN-SDK
-repo_name: WingkySky/AGN-SDK
+repo_url: https://github.com/WingkySky/AiBridge
+repo_name: WingkySky/AiBridge
 edit_uri: edit/main/docs/
 
 docs_dir: docs
@@ -98,4 +98,4 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/WingkySky/AGN-SDK
+      link: https://github.com/WingkySky/AiBridge

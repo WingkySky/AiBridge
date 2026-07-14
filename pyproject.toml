@@ -54,10 +54,10 @@ dev = [
 
 # 项目 URL
 [project.urls]
-Homepage = "https://github.com/WingkySky/AGN-SDK"
-Repository = "https://github.com/WingkySky/AGN-SDK"
-Documentation = "https://github.com/WingkySky/AGN-SDK#readme"
-Issues = "https://github.com/WingkySky/AGN-SDK/issues"
+Homepage = "https://github.com/WingkySky/AiBridge"
+Repository = "https://github.com/WingkySky/AiBridge"
+Documentation = "https://github.com/WingkySky/AiBridge#readme"
+Issues = "https://github.com/WingkySky/AiBridge/issues"
 
 # flit 配置
 [tool.flit.module]
