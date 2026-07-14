@@ -1,15 +1,13 @@
 # AIBridge
 
-English | [中文](README.zh-CN.md)
-
-> Cross-language unified AI interface SDK — one API to call every AI model.
+> Cross-language unified AI interface SDK - one API to call every AI model.
 > Rust core + native bindings for five languages: Python / JS-TS / Go / JVM / .NET.
 
-[![status](https://img.shields.io/badge/status-Phase%203%20release%20in%20progress-yellow)](docs/en/PROGRESS.md)
+[![status](https://img.shields.io/badge/status-Phase%203%20release%20in%20progress-yellow)](PROGRESS.md)
 [![provider](https://img.shields.io/badge/provider-38+-blue)](#supported-providers)
-[![core tests](https://img.shields.io/badge/core%20tests-1448-brightgreen)](docs/en/PROGRESS.md)
+[![core tests](https://img.shields.io/badge/core%20tests-1448-brightgreen)](PROGRESS.md)
 
-AIBridge (formerly agn-sdk) is a multimodal unified AI interface SDK: text chat, image generation (image), video generation (video), text-to-speech (TTS), speech-to-text (ASR), and text embedding (embed) — one API to call 38+ AI providers.
+AIBridge (formerly agn-sdk) is a multimodal unified AI interface SDK: text chat, image generation (image), video generation (video), text-to-speech (TTS), speech-to-text (ASR), and text embedding (embed) - one API to call 38+ AI providers.
 
 - **Native imports in five languages**: Python / JS-TS / Go / JVM (Java, Kotlin) / .NET (C#) all call the same set of capabilities directly.
 - **Rust core**: no GIL, native async, zero-cost abstractions, high performance for IO-bound workloads.
@@ -17,7 +15,7 @@ AIBridge (formerly agn-sdk) is a multimodal unified AI interface SDK: text chat,
 - **Six capabilities**: chat (including streaming) / image / video / TTS / ASR / embed
 - **Auth-free provider**: edge-tts offers free TTS with no API key required.
 
-> **v2 is a breaking upgrade**. If you are already using Python v1 (`agn-sdk`), see the [Migration Guide](docs/en/migration-guide.md).
+> **v2 is a breaking upgrade**. If you are already using Python v1 (`agn-sdk`), see the [Migration Guide](migration-guide.md).
 
 ---
 
@@ -55,7 +53,7 @@ AIBridge (formerly agn-sdk) is a multimodal unified AI interface SDK: text chat,
 - **Go / JVM / .NET go through the C ABI**: via the C ABI of `aibridge-ffi` (handle + JSON boundary + global tokio runtime), each language wraps it with its own native async primitives.
 - **All five languages share the same Rust core**, keeping the binding layers thin and behavior consistent.
 
-See the [Design](docs/en/design.md) doc for details.
+See the [Design](design.md) doc for details.
 
 ---
 
@@ -382,17 +380,17 @@ cd crates/aibridge-node && npm install && napi build
 
 A unified error base class `AibridgeError`, with subclasses categorized by error nature (exception names are consistent across languages):
 
-- `AuthenticationError` — authentication failed
-- `RateLimitError` — rate limited (includes `retry_after`)
-- `ValidationError` — parameter validation
-- `ModelNotFoundError` — model does not exist
-- `APIError` — provider API error
-- `NetworkError` — network error
-- `TimeoutError` — timeout
-- `UnsupportedCapabilityError` — capability not supported
-- `ProviderNotFoundError` — provider does not exist
-- `VoiceNotAvailableError` — voice not available
-- `ServiceUnavailableError` — service temporarily unavailable (retryable)
+- `AuthenticationError` - authentication failed
+- `RateLimitError` - rate limited (includes `retry_after`)
+- `ValidationError` - parameter validation
+- `ModelNotFoundError` - model does not exist
+- `APIError` - provider API error
+- `NetworkError` - network error
+- `TimeoutError` - timeout
+- `UnsupportedCapabilityError` - capability not supported
+- `ProviderNotFoundError` - provider does not exist
+- `VoiceNotAvailableError` - voice not available
+- `ServiceUnavailableError` - service temporarily unavailable (retryable)
 
 Errors carry a stable `code` (snake_case, e.g. `rate_limit_error`) and a `retryable` flag, making retry decisions easy at the business layer.
 
@@ -400,10 +398,10 @@ Errors carry a stable `code` (snake_case, e.g. `rate_limit_error`) and a `retrya
 
 ## Documentation
 
-- [Design](docs/en/design.md) — architecture, data models, FFI boundary, async bridging, error handling, adapter migration strategy
-- [Migration Guide](docs/en/migration-guide.md) — breaking-change comparison and examples for Python v1 (agn-sdk) → v2 (aibridge)
-- [Progress](docs/en/PROGRESS.md) — current implementation progress and handoff guide
-- [Original README (v1)](README_v1.md) — Python v1 docs (archived for reference)
+- [Design](design.md) - architecture, data models, FFI boundary, async bridging, error handling, adapter migration strategy
+- [Migration Guide](migration-guide.md) - breaking-change comparison and examples for Python v1 (agn-sdk) -> v2 (aibridge)
+- [Progress](PROGRESS.md) - current implementation progress and handoff guide
+- [Original README (v1)](https://github.com/WingkySky/AiBridge/blob/main/README_v1.md) - Python v1 docs (archived for reference)
 
 ---
 
