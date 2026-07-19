@@ -127,9 +127,9 @@ impl RetryPolicyBuilder {
 ///     Ok(42)
 /// }).await;
 /// ```
-pub async fn retry_with<T, F, Fut>(policy: &RetryPolicy, operation: F) -> Result<T>
+pub async fn retry_with<T, F, Fut>(policy: &RetryPolicy, mut operation: F) -> Result<T>
 where
-    F: Fn() -> Fut,
+    F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,
 {
     let mut last_err: Option<AibridgeError> = None;

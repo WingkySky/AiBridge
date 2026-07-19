@@ -120,6 +120,15 @@ impl OpenAiCompatAdapter {
         })
     }
 
+    /// 重试策略（从配置提取 max_retries / retry_delay）
+    fn retry_policy(&self) -> crate::retry::RetryPolicy {
+        let max_attempts = self.config.max_retries.max(1);
+        crate::retry::RetryPolicy::builder()
+            .max_attempts(max_attempts)
+            .delay(self.config.retry_delay)
+            .build()
+    }
+
     /// 用显式的 HttpClient 构造（测试用，可注入 mockito 后端）
     #[cfg(test)]
     pub fn with_http(
@@ -214,70 +223,87 @@ impl OpenAiCompatAdapter {
     ///
     /// 不依赖 HttpClient 的自动错误处理（其 from_http_status 不提取 OpenAI
     /// error.message / retry_after），而是用 map_api_error 统一映射。
+    /// 使用 retry_with 包裹以实现自动重试（仅对可重试错误重试）。
     async fn post_authed_json(&self, path: &str, body: &Value) -> Result<Value> {
         let url = self.url(path);
-        let resp = self
-            .http
-            .inner()
-            .post(&url)
-            .bearer_auth(self.api_key().unwrap_or(""))
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    AibridgeError::Timeout
-                } else {
-                    AibridgeError::Network(e)
-                }
-            })?;
-        let status = resp.status();
-        if !status.is_success() {
-            let status_code = status.as_u16();
-            let body_text = resp.text().await.unwrap_or_default();
-            return Err(Self::map_api_error(status_code, &body_text));
-        }
-        resp.json::<Value>().await.map_err(AibridgeError::from)
+        let api_key = self.api_key().unwrap_or("").to_string();
+        let body_clone = body.clone();
+        let policy = self.retry_policy();
+        let mut op = || async {
+            let resp = self
+                .http
+                .inner()
+                .post(&url)
+                .bearer_auth(&api_key)
+                .json(&body_clone)
+                .send()
+                .await
+                .map_err(|e| {
+                    if e.is_timeout() {
+                        AibridgeError::Timeout
+                    } else {
+                        AibridgeError::Network(e)
+                    }
+                })?;
+            let status = resp.status();
+            if !status.is_success() {
+                let status_code = status.as_u16();
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(Self::map_api_error(status_code, &body_text));
+            }
+            resp.json::<Value>().await.map_err(AibridgeError::from)
+        };
+        crate::retry::retry_with(&policy, &mut op).await
     }
 
     /// 发送带认证的 GET 请求，并用 OpenAI 错误映射处理响应
+    /// 使用 retry_with 包裹以实现自动重试。
     async fn get_authed_json(&self, path: &str) -> Result<Value> {
         let url = self.url(path);
-        let resp = self
-            .http
-            .inner()
-            .get(&url)
-            .bearer_auth(self.api_key().unwrap_or(""))
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    AibridgeError::Timeout
-                } else {
-                    AibridgeError::Network(e)
-                }
-            })?;
-        let status = resp.status();
-        if !status.is_success() {
-            let status_code = status.as_u16();
-            let body_text = resp.text().await.unwrap_or_default();
-            return Err(Self::map_api_error(status_code, &body_text));
-        }
-        resp.json::<Value>().await.map_err(AibridgeError::from)
+        let api_key = self.api_key().unwrap_or("").to_string();
+        let policy = self.retry_policy();
+        let mut op = || async {
+            let resp = self
+                .http
+                .inner()
+                .get(&url)
+                .bearer_auth(&api_key)
+                .send()
+                .await
+                .map_err(|e| {
+                    if e.is_timeout() {
+                        AibridgeError::Timeout
+                    } else {
+                        AibridgeError::Network(e)
+                    }
+                })?;
+            let status = resp.status();
+            if !status.is_success() {
+                let status_code = status.as_u16();
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(Self::map_api_error(status_code, &body_text));
+            }
+            resp.json::<Value>().await.map_err(AibridgeError::from)
+        };
+        crate::retry::retry_with(&policy, &mut op).await
     }
 
     /// 发送带认证的 multipart/form-data POST 请求（音频上传），错误映射与 JSON 请求一致
+    ///
+    /// multipart 请求体不可重复发送（Form 是一次性的），因此不使用 retry_with。
+    /// 网络错误（超时）可重试，但 HTTP 错误仍走统一映射。
     async fn post_authed_multipart(
         &self,
         path: &str,
         form: reqwest::multipart::Form,
     ) -> Result<Value> {
         let url = self.url(path);
+        let api_key = self.api_key().unwrap_or("").to_string();
         let resp = self
             .http
             .inner()
             .post(&url)
-            .bearer_auth(self.api_key().unwrap_or(""))
+            .bearer_auth(&api_key)
             .multipart(form)
             .send()
             .await
