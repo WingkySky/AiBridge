@@ -58,6 +58,8 @@ use aibridge_core::model::options::{
 use aibridge_core::model::video::{
     VideoRequest as CoreVideoRequest, VideoStatus as CoreVideoStatus, VideoTask as CoreVideoTask,
 };
+use aibridge_core::router::{ProviderEntry as CoreProviderEntry, Router as CoreRouter};
+use aibridge_core::router::{RoutingStrategy as CoreRoutingStrategy};
 
 // ===========================================================================
 // 全局 tokio runtime
@@ -2013,6 +2015,665 @@ impl Client {
         let voices = result.map_err(map_error)?;
         Ok(voices.into_iter().map(VoiceInfo::from_core).collect())
     }
+
+    /// 语音翻译（翻译为英文）
+    ///
+    /// 参数同 `transcribe`，额外参数 `translate=True` 会调用各 Provider 的翻译端点
+    ///（如 OpenAI `/audio/translations`、AssemblyAI `task="translate"`）。
+    /// 默认实现委托 `transcribe` 并设置 `translate=true`。
+    #[pyo3(signature = (model, file, language=None, prompt=None, response_format="json", temperature=None, **kwargs))]
+    async fn translate(
+        &self,
+        model: String,
+        file: Py<PyAny>,
+        language: Option<String>,
+        prompt: Option<String>,
+        response_format: &str,
+        temperature: Option<f64>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<TranscriptionResult> {
+        let (file_input, extra) = Python::attach(|py| -> PyResult<(
+            CoreFileInput,
+            std::collections::HashMap<String, serde_json::Value>,
+        )> {
+            let file_input = py_to_file_input(file.bind(py))?;
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            Ok((file_input, extra))
+        })?;
+
+        let mut builder = CoreTranscribeRequest::builder(model, file_input)
+            .response_format(response_format)
+            .translate(true);
+        if let Some(l) = language {
+            builder = builder.language(l);
+        }
+        if let Some(p) = prompt {
+            builder = builder.prompt(p);
+        }
+        if let Some(t) = temperature {
+            builder = builder.temperature(t);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let client = inner.lock().await;
+                client.translate(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("translate 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(TranscriptionResult::from_core(r))
+    }
+
+    /// 异步上下文管理器：`__aenter__`
+    ///
+    /// 支持 `async with Client(...) as client:` 用法，等价于手动调用 `start()`。
+    async fn __aenter__(&mut self) -> PyResult<()> {
+        self.start().await
+    }
+
+    /// 异步上下文管理器：`__aexit__`
+    ///
+    /// 退出上下文时自动调用 `close()` 释放资源。
+    async fn __aexit__(&mut self) -> PyResult<()> {
+        self.close().await
+    }
+}
+
+// ===========================================================================
+// 路由器
+// ===========================================================================
+
+/// 多 Provider 路由器
+///
+/// 对应 Python v1 `agn/router.py` 的 `Router` 类。
+/// 支持五种路由策略（first/round_robin/random/weighted/latency）、
+/// Fallback、健康状态跟踪、延迟统计、自定义模型映射。
+///
+/// 示例：
+/// ```python
+/// import asyncio
+/// from aibridge import Router
+///
+/// async def main():
+///     router = Router()
+///     router.add_provider("openai", api_key="sk-xxx")
+///     router.add_provider("agnes", api_key="sk-xxx")
+///     await router.start()
+///     resp = await router.chat(model="gpt-4o", ...)
+///     await router.close()
+///
+/// asyncio.run(main())
+/// ```
+#[pyclass]
+struct Router {
+    inner: Arc<tokio::sync::Mutex<CoreRouter>>,
+}
+
+#[pymethods]
+impl Router {
+    #[new]
+    #[pyo3(signature = (strategy="first", enable_fallback=true, max_retries=2))]
+    fn new(strategy: &str, enable_fallback: bool, max_retries: u32) -> PyResult<Self> {
+        let routing_strategy = match strategy.to_lowercase().as_str() {
+            "round_robin" => CoreRoutingStrategy::RoundRobin,
+            "random" => CoreRoutingStrategy::Random,
+            "weighted" => CoreRoutingStrategy::Weighted,
+            "latency" => CoreRoutingStrategy::Latency,
+            _ => CoreRoutingStrategy::First,
+        };
+        let router = CoreRouter::with_strategy(vec![], routing_strategy)
+            .with_fallback(enable_fallback)
+            .with_max_retries(max_retries);
+        Ok(Self {
+            inner: Arc::new(tokio::sync::Mutex::new(router)),
+        })
+    }
+
+    /// 添加一个 Provider 路由条目
+    ///
+    /// 参数：
+    /// - `provider`: Provider 类型（如 "openai"、"agnes"）
+    /// - `api_key`: 可选 API Key
+    /// - `base_url`: 可选 API Base URL
+    /// - `weight`: 可选权重（weighted 策略用，默认 1）
+    #[pyo3(signature = (provider, *, api_key=None, base_url=None, weight=1))]
+    fn add_provider(
+        &self,
+        provider: &str,
+        api_key: Option<String>,
+        base_url: Option<String>,
+        weight: u32,
+    ) {
+        let mut opts_builder = CoreClientOptions::builder();
+        if let Some(key) = api_key {
+            opts_builder = opts_builder.api_key(key);
+        }
+        if let Some(url) = base_url {
+            opts_builder = opts_builder.base_url(url);
+        }
+        let opts = opts_builder.build();
+        let entry = CoreProviderEntry::new(provider, opts).with_weight(weight);
+        let mut router = RUNTIME.block_on(async { self.inner.lock().await });
+        let mut entries = router.entries_mut();
+        entries.push(entry);
+    }
+
+    /// 注册自定义模型 → Provider 映射
+    fn register_model_mapping(&self, model: &str, provider: &str) {
+        let mut router = RUNTIME.block_on(async { self.inner.lock().await });
+        router.register_model_mapping(model, provider);
+    }
+
+    /// 设置是否启用 Fallback
+    fn set_fallback(&self, enable: bool) {
+        let mut router = RUNTIME.block_on(async { self.inner.lock().await });
+        router.enable_fallback = enable;
+    }
+
+    /// 设置 Fallback 最大重试次数
+    fn set_max_retries(&self, n: u32) {
+        let mut router = RUNTIME.block_on(async { self.inner.lock().await });
+        router.max_retries = n;
+    }
+
+    /// 启动路由器（初始化所有 Provider 适配器）
+    async fn start(&self) -> PyResult<()> {
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let mut router = inner.lock().await;
+                router.start().await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router start 任务失败: {e}"))
+            })?;
+        result.map_err(map_error)
+    }
+
+    /// 关闭路由器（释放所有资源）
+    async fn close(&self) -> PyResult<()> {
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let mut router = inner.lock().await;
+                router.close().await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router close 任务失败: {e}"))
+            })?;
+        result.map_err(map_error)
+    }
+
+    /// 文本对话（带 Fallback）
+    #[pyo3(signature = (model, messages, *, temperature=None, max_tokens=None))]
+    async fn chat(
+        &self,
+        model: String,
+        messages: Vec<Py<PyAny>>,
+        temperature: Option<f64>,
+        max_tokens: Option<u32>,
+    ) -> PyResult<ChatCompletion> {
+        let core_messages = Python::attach(|py| {
+            messages
+                .iter()
+                .map(|m| ChatMessage::to_core(m.bind(py)))
+                .collect::<PyResult<Vec<CoreChatMessage>>>()
+        })?;
+
+        let mut builder = CoreChatRequest::builder(model, core_messages);
+        if let Some(t) = temperature {
+            builder = builder.temperature(t);
+        }
+        if let Some(m) = max_tokens {
+            builder = builder.max_tokens(m);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.chat(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router chat 任务失败: {e}"))
+            })?;
+
+        let completion = result.map_err(map_error)?;
+        Ok(ChatCompletion::from_core(completion))
+    }
+
+    /// 流式文本对话（不支持 Fallback）
+    #[pyo3(signature = (model, messages, *, temperature=None, max_tokens=None))]
+    async fn chat_stream(
+        &self,
+        model: String,
+        messages: Vec<Py<PyAny>>,
+        temperature: Option<f64>,
+        max_tokens: Option<u32>,
+    ) -> PyResult<ChatStreamIterator> {
+        let core_messages = Python::attach(|py| {
+            messages
+                .iter()
+                .map(|m| ChatMessage::to_core(m.bind(py)))
+                .collect::<PyResult<Vec<CoreChatMessage>>>()
+        })?;
+
+        let mut builder = CoreChatRequest::builder(model, core_messages).stream(true);
+        if let Some(t) = temperature {
+            builder = builder.temperature(t);
+        }
+        if let Some(m) = max_tokens {
+            builder = builder.max_tokens(m);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let stream_result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.chat_stream(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router chat_stream 任务失败: {e}"))
+            })?;
+
+        let stream = stream_result.map_err(map_error)?;
+        Ok(ChatStreamIterator {
+            inner: Arc::new(Mutex::new(Some(stream))),
+        })
+    }
+
+    /// 图像生成（带 Fallback）
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (model, prompt, size="1024x1024", n=1, negative_prompt=None, reference_images=None, mask=None, response_format="url", **kwargs))]
+    async fn image_generate(
+        &self,
+        model: String,
+        prompt: String,
+        size: &str,
+        n: u32,
+        negative_prompt: Option<String>,
+        reference_images: Option<Vec<Py<PyAny>>>,
+        mask: Option<Py<PyAny>>,
+        response_format: &str,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<ImageResult> {
+        let (extra, ref_imgs, mask_input) = Python::attach(|py| -> PyResult<(
+            std::collections::HashMap<String, serde_json::Value>,
+            Vec<CoreFileInput>,
+            Option<CoreFileInput>,
+        )> {
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            let ref_imgs = match &reference_images {
+                Some(imgs) => imgs
+                    .iter()
+                    .map(|i| py_to_file_input(i.bind(py)))
+                    .collect::<PyResult<Vec<_>>>()?,
+                None => Vec::new(),
+            };
+            let mask_input = match &mask {
+                Some(m) => Some(py_to_file_input(m.bind(py))?),
+                None => None,
+            };
+            Ok((extra, ref_imgs, mask_input))
+        })?;
+
+        let mut builder = CoreImageRequest::builder(model, prompt)
+            .size(size)
+            .n(n)
+            .response_format(response_format);
+        if let Some(np) = negative_prompt {
+            builder = builder.negative_prompt(np);
+        }
+        if !ref_imgs.is_empty() {
+            builder = builder.reference_images(ref_imgs);
+        }
+        if let Some(m) = mask_input {
+            builder = builder.mask(m);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.image_generate(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router image_generate 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(ImageResult::from_core(r))
+    }
+
+    /// 创建视频生成任务
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (model, prompt, width=1280, height=720, num_frames=None, frame_rate=24, mode="text2video", reference_images=None, negative_prompt=None, seed=None, **kwargs))]
+    async fn video_create(
+        &self,
+        model: String,
+        prompt: String,
+        width: u32,
+        height: u32,
+        num_frames: Option<u32>,
+        frame_rate: u32,
+        mode: &str,
+        reference_images: Option<Vec<Py<PyAny>>>,
+        negative_prompt: Option<String>,
+        seed: Option<u64>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<VideoTask> {
+        let (extra, ref_imgs) = Python::attach(|py| -> PyResult<(
+            std::collections::HashMap<String, serde_json::Value>,
+            Vec<CoreFileInput>,
+        )> {
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            let ref_imgs = match &reference_images {
+                Some(imgs) => imgs
+                    .iter()
+                    .map(|i| py_to_file_input(i.bind(py)))
+                    .collect::<PyResult<Vec<_>>>()?,
+                None => Vec::new(),
+            };
+            Ok((extra, ref_imgs))
+        })?;
+
+        let mut builder = CoreVideoRequest::builder(model, prompt)
+            .width(width)
+            .height(height)
+            .frame_rate(frame_rate)
+            .mode(parse_video_mode(mode));
+        if let Some(nf) = num_frames {
+            builder = builder.num_frames(nf);
+        }
+        if !ref_imgs.is_empty() {
+            builder = builder.reference_images(ref_imgs);
+        }
+        if let Some(np) = negative_prompt {
+            builder = builder.negative_prompt(np);
+        }
+        if let Some(s) = seed {
+            builder = builder.seed(s);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.video_create(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router video_create 任务失败: {e}"))
+            })?;
+
+        let t = result.map_err(map_error)?;
+        Ok(VideoTask::from_core(t))
+    }
+
+    /// 查询视频任务状态
+    #[pyo3(signature = (task_id, model=""))]
+    async fn video_poll(&self, task_id: String, model: &str) -> PyResult<VideoStatus> {
+        let model = model.to_string();
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.video_poll(&task_id, &model).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router video_poll 任务失败: {e}"))
+            })?;
+
+        let s = result.map_err(map_error)?;
+        Ok(VideoStatus::from_core(s))
+    }
+
+    /// 文本嵌入（带 Fallback）
+    #[pyo3(signature = (model, input, **kwargs))]
+    async fn embed(
+        &self,
+        model: String,
+        input: Py<PyAny>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<EmbeddingResult> {
+        let (embed_input, extra) = Python::attach(|py| -> PyResult<(
+            CoreEmbedInput,
+            std::collections::HashMap<String, serde_json::Value>,
+        )> {
+            let embed_input = py_to_embed_input(input.bind(py))?;
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            Ok((embed_input, extra))
+        })?;
+
+        let req = CoreEmbedRequest {
+            model,
+            input: embed_input,
+            dimensions: None,
+            encoding_format: None,
+            user: None,
+            extra,
+        };
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.embed(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router embed 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(EmbeddingResult::from_core(r))
+    }
+
+    /// 语音转文字（带 Fallback）
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (model, file, language=None, prompt=None, response_format="json", temperature=None, **kwargs))]
+    async fn transcribe(
+        &self,
+        model: String,
+        file: Py<PyAny>,
+        language: Option<String>,
+        prompt: Option<String>,
+        response_format: &str,
+        temperature: Option<f64>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<TranscriptionResult> {
+        let (file_input, extra) = Python::attach(|py| -> PyResult<(
+            CoreFileInput,
+            std::collections::HashMap<String, serde_json::Value>,
+        )> {
+            let file_input = py_to_file_input(file.bind(py))?;
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            Ok((file_input, extra))
+        })?;
+
+        let mut builder = CoreTranscribeRequest::builder(model, file_input)
+            .response_format(response_format);
+        if let Some(l) = language {
+            builder = builder.language(l);
+        }
+        if let Some(p) = prompt {
+            builder = builder.prompt(p);
+        }
+        if let Some(t) = temperature {
+            builder = builder.temperature(t);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.transcribe(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router transcribe 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(TranscriptionResult::from_core(r))
+    }
+
+    /// 语音翻译（翻译为英文，带 Fallback）
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (model, file, language=None, prompt=None, response_format="json", temperature=None, **kwargs))]
+    async fn translate(
+        &self,
+        model: String,
+        file: Py<PyAny>,
+        language: Option<String>,
+        prompt: Option<String>,
+        response_format: &str,
+        temperature: Option<f64>,
+        kwargs: Option<Py<PyDict>>,
+    ) -> PyResult<TranscriptionResult> {
+        let (file_input, extra) = Python::attach(|py| -> PyResult<(
+            CoreFileInput,
+            std::collections::HashMap<String, serde_json::Value>,
+        )> {
+            let file_input = py_to_file_input(file.bind(py))?;
+            let extra = match &kwargs {
+                Some(d) => kwargs_to_extra(d.bind(py))?,
+                None => std::collections::HashMap::new(),
+            };
+            Ok((file_input, extra))
+        })?;
+
+        let mut builder = CoreTranscribeRequest::builder(model, file_input)
+            .response_format(response_format)
+            .translate(true);
+        if let Some(l) = language {
+            builder = builder.language(l);
+        }
+        if let Some(p) = prompt {
+            builder = builder.prompt(p);
+        }
+        if let Some(t) = temperature {
+            builder = builder.temperature(t);
+        }
+        for (k, v) in extra {
+            builder = builder.extra(k, v);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.translate(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router translate 任务失败: {e}"))
+            })?;
+
+        let r = result.map_err(map_error)?;
+        Ok(TranscriptionResult::from_core(r))
+    }
+
+    /// 文字转语音（带 Fallback）
+    #[pyo3(signature = (model, input, voice, *, response_format=None, speed=None))]
+    async fn speech(
+        &self,
+        model: String,
+        input: String,
+        voice: String,
+        response_format: Option<String>,
+        speed: Option<f64>,
+    ) -> PyResult<SpeechResult> {
+        let mut builder = CoreSpeechRequest::builder(model, input, voice);
+        if let Some(f) = response_format {
+            builder = builder.response_format(f);
+        }
+        if let Some(s) = speed {
+            builder = builder.speed(s);
+        }
+        let req = builder.build();
+
+        let inner = self.inner.clone();
+        let result = RUNTIME
+            .spawn(async move {
+                let router = inner.lock().await;
+                router.speech(req).await
+            })
+            .await
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!("router speech 任务失败: {e}"))
+            })?;
+
+        let speech = result.map_err(map_error)?;
+        Ok(SpeechResult::from_core(speech))
+    }
+
+    /// 获取所有 Provider 的健康状态
+    fn get_health_status(&self) -> PyResult<std::collections::HashMap<String, bool>> {
+        let router = RUNTIME.block_on(async { self.inner.lock().await });
+        Ok(router.get_health_status())
+    }
+
+    /// 获取所有 Provider 的延迟统计（秒）
+    fn get_latency_stats(&self) -> PyResult<std::collections::HashMap<String, f64>> {
+        let router = RUNTIME.block_on(async { self.inner.lock().await });
+        Ok(router.get_latency_stats())
+    }
+
+    /// 异步上下文管理器：`__aenter__`
+    async fn __aenter__(&mut self) -> PyResult<()> {
+        self.start().await
+    }
+
+    /// 异步上下文管理器：`__aexit__`
+    async fn __aexit__(&mut self) -> PyResult<()> {
+        self.close().await
+    }
 }
 
 // ===========================================================================
@@ -2082,6 +2743,7 @@ fn _aibridge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // 客户端与流式
     m.add_class::<Client>()?;
     m.add_class::<ChatStreamIterator>()?;
+    m.add_class::<Router>()?;
 
     // 模块版本
     m.add("__version__", aibridge_core::VERSION)?;

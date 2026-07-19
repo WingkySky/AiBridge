@@ -82,8 +82,8 @@ pub struct Router {
     entries: Vec<ProviderEntry>,
     default_provider: Option<String>,
     strategy: RoutingStrategy,
-    enable_fallback: bool,
-    max_retries: u32,
+    pub enable_fallback: bool,
+    pub max_retries: u32,
 
     // 运行时状态（用 RwLock 支持 &self 方法）
     inner: RwLock<RouterInner>,
@@ -148,6 +148,11 @@ impl Router {
     pub fn with_max_retries(mut self, n: u32) -> Self {
         self.max_retries = n;
         self
+    }
+
+    /// 获取条目列表的可变引用（Python 绑定用）
+    pub fn entries_mut(&mut self) -> &mut Vec<ProviderEntry> {
+        &mut self.entries
     }
 
     /// 启动路由器（初始化所有适配器）
