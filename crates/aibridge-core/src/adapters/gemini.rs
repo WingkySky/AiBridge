@@ -72,7 +72,10 @@ pub fn gemini_mapping() -> ParameterMapping {
         "response_format".to_string(),
         Some("response_mime_type".to_string()),
     );
-    ParameterMapping { rename_map }
+    ParameterMapping {
+        rename_map,
+        ..Default::default()
+    }
 }
 
 /// Google Gemini 适配器

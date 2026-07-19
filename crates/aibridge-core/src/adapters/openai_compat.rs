@@ -27,8 +27,11 @@ use crate::model::chat::{
     ChatChoice, ChatCompletion, ChatCompletionChunk, ChatCompletionDelta, ChatRequest,
     ChoiceMessage, DeltaMessage,
 };
+use crate::model::audio::{
+    TranscribeRequest, TranscriptionResult, TranscriptionSegment, TranscriptionWord,
+};
 use crate::model::common::{infer_model_type, ModelInfo, ModelType};
-use crate::model::image::{ImageData, ImageRequest, ImageResult};
+use crate::model::image::{FileInput, ImageData, ImageRequest, ImageResult};
 use crate::model::options::{
     EmbedRequest, EmbeddingItem, EmbeddingResult, EmbeddingUsage, EmbeddingVector, ParameterMapping,
 };
@@ -263,6 +266,236 @@ impl OpenAiCompatAdapter {
         resp.json::<Value>().await.map_err(AibridgeError::from)
     }
 
+    /// 发送带认证的 multipart/form-data POST 请求（音频上传），错误映射与 JSON 请求一致
+    async fn post_authed_multipart(
+        &self,
+        path: &str,
+        form: reqwest::multipart::Form,
+    ) -> Result<Value> {
+        let url = self.url(path);
+        let resp = self
+            .http
+            .inner()
+            .post(&url)
+            .bearer_auth(self.api_key().unwrap_or(""))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    AibridgeError::Timeout
+                } else {
+                    AibridgeError::Network(e)
+                }
+            })?;
+        let status = resp.status();
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let body_text = resp.text().await.unwrap_or_default();
+            return Err(Self::map_api_error(status_code, &body_text));
+        }
+        resp.json::<Value>().await.map_err(AibridgeError::from)
+    }
+
+    /// 构造音频转写/翻译的 multipart 表单（transcribe 与 translate 共用）
+    ///
+    /// 对齐 Python v1：`model` 必传；`language` / `prompt` / `temperature` 非 None 才传；
+    /// `response_format` 总是传（默认 "json"）；`timestamp_granularities` 以
+    /// `timestamp_granularities[]` 数组字段逐个附加；`extra` 透传（布尔值序列化为
+    /// 小写 "true"/"false"——Python v1 的 `str(True)` 实为 "True"，此处按 OpenAI
+    /// 文档的标准小写形式发送）。
+    async fn build_transcribe_form(
+        &self,
+        req: &TranscribeRequest,
+    ) -> Result<reqwest::multipart::Form> {
+        use reqwest::multipart::{Form, Part};
+
+        let (bytes, filename, mime) = self.resolve_audio_upload(&req.file).await?;
+        let file_part = Part::bytes(bytes)
+            .file_name(filename)
+            .mime_str(&mime)
+            .map_err(|e| AibridgeError::validation(format!("音频 MIME 类型无效: {e}")))?;
+
+        let mut form = Form::new()
+            .text("model", req.model.clone())
+            .part("file", file_part);
+        if let Some(lang) = &req.language {
+            form = form.text("language", lang.clone());
+        }
+        if let Some(prompt) = &req.prompt {
+            form = form.text("prompt", prompt.clone());
+        }
+        form = form.text("response_format", req.response_format.clone());
+        if let Some(t) = req.temperature {
+            form = form.text("temperature", t.to_string());
+        }
+        for g in &req.timestamp_granularities {
+            form = form.text("timestamp_granularities[]", g.clone());
+        }
+        // extra 透传：布尔/数值取字符串形式，字符串取本身
+        for (k, v) in &req.extra {
+            let s = match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            form = form.text(k.clone(), s);
+        }
+        Ok(form)
+    }
+
+    /// 解析音频上传输入：读取字节 + 推断文件名 + MIME 类型
+    ///
+    /// - `Path`：读本地文件，文件名取路径末段，MIME 按扩展名
+    /// - `Url`：先 GET 下载（对齐 Python v1），文件名取 URL 路径末段（去 query）
+    /// - `Bytes` / `Base64`：文件名默认 `audio.wav`，MIME 默认 `audio/wav`
+    async fn resolve_audio_upload(&self, file: &FileInput) -> Result<(Vec<u8>, String, String)> {
+        match file {
+            FileInput::Bytes(b) => Ok((b.clone(), "audio.wav".into(), "audio/wav".into())),
+            FileInput::Base64(s) => {
+                let bytes = util::decode_base64(s)
+                    .map_err(|e| AibridgeError::validation(format!("Base64 音频解码失败: {e}")))?;
+                Ok((bytes, "audio.wav".into(), "audio/wav".into()))
+            }
+            FileInput::Path(p) => {
+                let path = std::path::Path::new(p);
+                if !path.exists() {
+                    return Err(AibridgeError::validation(format!("音频文件不存在: {p}")));
+                }
+                let bytes = tokio::fs::read(path)
+                    .await
+                    .map_err(|e| AibridgeError::validation(format!("读取音频文件失败: {e}")))?;
+                let filename = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("audio.wav")
+                    .to_string();
+                let mime = Self::mime_from_filename(&filename);
+                Ok((bytes, filename, mime))
+            }
+            FileInput::Url(u) => {
+                let resp = self.http.inner().get(u).send().await.map_err(|e| {
+                    if e.is_timeout() {
+                        AibridgeError::Timeout
+                    } else {
+                        AibridgeError::Network(e)
+                    }
+                })?;
+                if !resp.status().is_success() {
+                    return Err(AibridgeError::validation(format!(
+                        "下载音频失败（{}）: {u}",
+                        resp.status()
+                    )));
+                }
+                let bytes = resp.bytes().await.map_err(AibridgeError::Network)?;
+                let filename = u
+                    .split('?')
+                    .next()
+                    .and_then(|p| p.rsplit('/').next())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or("audio.wav")
+                    .to_string();
+                let mime = Self::mime_from_filename(&filename);
+                Ok((bytes.to_vec(), filename, mime))
+            }
+        }
+    }
+
+    /// 按文件名扩展名推断音频 MIME 类型
+    fn mime_from_filename(filename: &str) -> String {
+        let ext = filename
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_lowercase();
+        match ext.as_str() {
+            "mp3" => "audio/mpeg",
+            "wav" => "audio/wav",
+            "m4a" | "mp4" => "audio/mp4",
+            "ogg" => "audio/ogg",
+            "flac" => "audio/flac",
+            "webm" => "audio/webm",
+            _ => "application/octet-stream",
+        }
+        .to_string()
+    }
+
+    /// 解析 OpenAI 转写/翻译响应为统一 `TranscriptionResult`
+    ///
+    /// - `json` 格式仅含 `text`；`verbose_json` 另含 language / duration / segments / words / usage
+    /// - `task` 为 "transcribe" 或 "translate"；translate 时 `force_language` 固定 "en"
+    ///   （对齐 Python v1 `openai.py:translate` 的 `language="en"`）
+    /// - `model`：响应缺省时回退为请求模型（对齐 Python v1 `result.get("model", model)`）
+    fn parse_transcription_result(
+        value: &Value,
+        req_model: &str,
+        task: &str,
+        force_language: Option<&str>,
+    ) -> TranscriptionResult {
+        let text = value
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let language = force_language
+            .map(|s| s.to_string())
+            .or_else(|| {
+                value
+                    .get("language")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            });
+        let duration = value.get("duration").and_then(|v| v.as_f64());
+        let segments = value
+            .get("segments")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|seg| TranscriptionSegment {
+                        id: seg.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                        start: seg.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        end: seg.get("end").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        text: seg
+                            .get("text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        confidence: None,
+                        speaker: None,
+                    })
+                    .collect::<Vec<_>>()
+            });
+        let words = value
+            .get("words")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|w| TranscriptionWord {
+                        word: w
+                            .get("word")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        start: w.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        end: w.get("end").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        confidence: None,
+                    })
+                    .collect::<Vec<_>>()
+            });
+        TranscriptionResult {
+            text,
+            language,
+            duration,
+            segments,
+            words,
+            task: task.to_string(),
+            usage: value.get("usage").cloned(),
+            model: value
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| Some(req_model.to_string())),
+        }
+    }
     /// 构造 OpenAI chat/completions 请求体
     ///
     /// 将统一 `ChatRequest` 转为 OpenAI 协议的 JSON 请求体。
@@ -277,15 +510,34 @@ impl OpenAiCompatAdapter {
         // 强制覆盖 stream 标志（统一请求的 stream 字段默认 false，流式调用时需置 true）
         if stream {
             body["stream"] = json!(true);
-            // 流式场景附带 stream_options.include_usage，便于末尾拿到 usage 统计
-            body["stream_options"] = json!({ "include_usage": true });
-        } else if body
-            .get("stream")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            // 非流式调用但请求体带了 stream=true，移除避免歧义
-            body["stream"] = json!(false);
+            // 流式场景合并用户自定义 stream_options，未显式指定 include_usage 时补 true，
+            // 便于末尾拿到 usage 统计
+            let mut opts = body
+                .get("stream_options")
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            opts.entry("include_usage".to_string()).or_insert(json!(true));
+            body["stream_options"] = Value::Object(opts);
+        } else {
+            if body
+                .get("stream")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                // 非流式调用但请求体带了 stream=true，移除避免歧义
+                body["stream"] = json!(false);
+            }
+            // stream_options 仅流式生效（对齐 OpenAI API 行为），非流式移除
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("stream_options");
+            }
+        }
+        // web_search 系列字段移除（对齐 Python v1 OPENAI_COMPATIBLE_MAPPING rename 为 None）：
+        // 支持联网搜索的 provider 经 extra 透传或自有适配器处理
+        if let Some(obj) = body.as_object_mut() {
+            obj.remove("web_search");
+            obj.remove("search_recency_filter");
+            obj.remove("search_domain_filter");
         }
         // extra 透传：合并到顶层（extra 字段本身不发送）
         if let Some(obj) = body.as_object_mut() {
@@ -424,6 +676,42 @@ impl OpenAiCompatAdapter {
         let body = self.build_embed_body(&req);
         let value = self.post_authed_json("embeddings", &body).await?;
         self.parse_embedding_result(&value, &req.model)
+    }
+
+    /// 语音转文字（OpenAI whisper 端点）
+    ///
+    /// POST /audio/transcriptions（multipart/form-data 上传音频）。
+    /// 对应 Python v1 `chinese.py:transcribe` / `azure.py:transcribe`。
+    pub async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
+        self.ensure_capability(Capabilities::AudioTranscribe)?;
+        let form = self.build_transcribe_form(&req).await?;
+        let value = self
+            .post_authed_multipart("audio/transcriptions", form)
+            .await?;
+        Ok(Self::parse_transcription_result(
+            &value,
+            &req.model,
+            "transcribe",
+            None,
+        ))
+    }
+
+    /// 语音翻译为英文（OpenAI whisper 端点）
+    ///
+    /// POST /audio/translations（multipart/form-data 上传音频）。
+    /// 对应 Python v1 `openai.py:translate`：结果语言固定为英文（task = "translate"）。
+    pub async fn translate(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
+        self.ensure_capability(Capabilities::AudioTranslate)?;
+        let form = self.build_transcribe_form(&req).await?;
+        let value = self
+            .post_authed_multipart("audio/translations", form)
+            .await?;
+        Ok(Self::parse_transcription_result(
+            &value,
+            &req.model,
+            "translate",
+            Some("en"),
+        ))
     }
 
     /// 模型列表（实时拉取）
@@ -1056,6 +1344,8 @@ mod tests {
         caps.insert(Capabilities::Embedding);
         caps.insert(Capabilities::Vision);
         caps.insert(Capabilities::ToolCall);
+        caps.insert(Capabilities::AudioTranscribe);
+        caps.insert(Capabilities::AudioTranslate);
         caps
     }
 
@@ -1662,6 +1952,171 @@ mod tests {
         assert!(matches!(err, AibridgeError::UnsupportedCapability { .. }));
     }
 
+    // ============ transcribe / translate（whisper 端点） ============
+
+    #[tokio::test]
+    async fn transcribe_success_bytes_upload() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/audio/transcriptions")
+            .match_header("authorization", "Bearer test-key")
+            // multipart body：校验 model / file / response_format 字段均随表单上传
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex(r#"name="model""#.into()),
+                mockito::Matcher::Regex(r#"whisper-1"#.into()),
+                mockito::Matcher::Regex(r#"name="file"; filename="audio.wav""#.into()),
+                mockito::Matcher::Regex(r#"name="response_format""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"text":"hello world"}"#)
+            .create_async()
+            .await;
+
+        let adapter = make_adapter(&server, full_caps());
+        let req = TranscribeRequest::builder("whisper-1", FileInput::bytes(b"fake-audio".to_vec()))
+            .build();
+        let result = adapter.transcribe(req).await.unwrap();
+        assert_eq!(result.text, "hello world");
+        assert_eq!(result.task, "transcribe");
+        assert_eq!(result.model.as_deref(), Some("whisper-1"));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn transcribe_verbose_json_parses_full_fields() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/audio/transcriptions")
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex(r#"name="language""#.into()),
+                mockito::Matcher::Regex(r#"zh"#.into()),
+                mockito::Matcher::Regex(r#"verbose_json"#.into()),
+                mockito::Matcher::Regex(r#"name="timestamp_granularities\[\]""#.into()),
+            ]))
+            .with_status(200)
+            .with_body(
+                r#"{
+                    "text": "你好世界",
+                    "language": "zh",
+                    "duration": 2.5,
+                    "segments": [{"id": 0, "start": 0.0, "end": 2.5, "text": "你好世界"}],
+                    "words": [{"word": "你好", "start": 0.0, "end": 1.0}],
+                    "usage": {"prompt_tokens": 10, "total_tokens": 10}
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let adapter = make_adapter(&server, full_caps());
+        let req = TranscribeRequest::builder("whisper-1", FileInput::bytes(b"audio".to_vec()))
+            .language("zh")
+            .response_format("verbose_json")
+            .timestamp_granularities(vec!["segment".into()])
+            .build();
+        let result = adapter.transcribe(req).await.unwrap();
+        assert_eq!(result.text, "你好世界");
+        assert_eq!(result.language.as_deref(), Some("zh"));
+        assert!((result.duration.unwrap() - 2.5).abs() < f64::EPSILON);
+        let segments = result.segments.unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "你好世界");
+        let words = result.words.unwrap();
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].word, "你好");
+        assert!(result.usage.is_some());
+    }
+
+    #[tokio::test]
+    async fn transcribe_url_input_downloads_then_uploads() {
+        let mut server = Server::new_async().await;
+        // 先下载音频
+        server
+            .mock("GET", "/media/speech.mp3")
+            .with_status(200)
+            .with_body(b"mp3-bytes".to_vec())
+            .create_async()
+            .await;
+        let mock = server
+            .mock("POST", "/audio/transcriptions")
+            // 文件名与 MIME 按 URL 扩展名推断
+            .match_body(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::Regex(r#"name="file"; filename="speech.mp3""#.into()),
+                mockito::Matcher::Regex(r#"audio/mpeg"#.into()),
+            ]))
+            .with_status(200)
+            .with_body(r#"{"text":"from url"}"#)
+            .create_async()
+            .await;
+
+        let adapter = make_adapter(&server, full_caps());
+        let url = format!("{}/media/speech.mp3", server.url());
+        let req = TranscribeRequest::builder("whisper-1", FileInput::url(url)).build();
+        let result = adapter.transcribe(req).await.unwrap();
+        assert_eq!(result.text, "from url");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn transcribe_unsupported_without_capability() {
+        let server = Server::new_async().await;
+        let mut caps = CapabilitySet::new();
+        caps.insert(Capabilities::Chat);
+        let adapter = make_adapter(&server, caps);
+        let req = TranscribeRequest::builder("whisper-1", FileInput::bytes(b"a".to_vec())).build();
+        let err = adapter.transcribe(req).await.unwrap_err();
+        assert!(matches!(err, AibridgeError::UnsupportedCapability { .. }));
+    }
+
+    #[tokio::test]
+    async fn translate_success_uses_translations_endpoint() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/audio/translations")
+            .match_header("authorization", "Bearer test-key")
+            .match_body(mockito::Matcher::Regex(r#"name="model""#.into()))
+            .with_status(200)
+            .with_body(r#"{"text":"translated to english","duration":1.5}"#)
+            .create_async()
+            .await;
+
+        let adapter = make_adapter(&server, full_caps());
+        let req = TranscribeRequest::builder("whisper-1", FileInput::bytes(b"audio".to_vec()))
+            .build();
+        let result = adapter.translate(req).await.unwrap();
+        assert_eq!(result.text, "translated to english");
+        // 对齐 Python v1：translate 结果语言固定为英文
+        assert_eq!(result.task, "translate");
+        assert_eq!(result.language.as_deref(), Some("en"));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn translate_unsupported_without_capability() {
+        let server = Server::new_async().await;
+        let mut caps = CapabilitySet::new();
+        caps.insert(Capabilities::AudioTranscribe);
+        let adapter = make_adapter(&server, caps);
+        let req = TranscribeRequest::builder("whisper-1", FileInput::bytes(b"a".to_vec())).build();
+        let err = adapter.translate(req).await.unwrap_err();
+        assert!(matches!(err, AibridgeError::UnsupportedCapability { .. }));
+    }
+
+    #[tokio::test]
+    async fn transcribe_error_401_returns_authentication() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/audio/transcriptions")
+            .with_status(401)
+            .with_body(json!({"error": {"message": "bad key"}}).to_string())
+            .create_async()
+            .await;
+
+        let adapter = make_adapter(&server, full_caps());
+        let req = TranscribeRequest::builder("whisper-1", FileInput::bytes(b"a".to_vec())).build();
+        let err = adapter.transcribe(req).await.unwrap_err();
+        assert!(matches!(err, AibridgeError::Authentication { .. }));
+    }
+
     // ============ list_models 正常 + 错误路径 ============
 
     #[tokio::test]
@@ -1958,5 +2413,117 @@ mod tests {
         assert!(result.is_some());
         let chunk = result.unwrap();
         assert_eq!(chunk.usage.as_ref().unwrap().total_tokens, 7);
+    }
+
+    // ============ 新字段请求体映射 ============
+
+    /// 构造仅用于请求体构建测试的适配器（不发起真实请求）
+    fn make_body_adapter() -> OpenAiCompatAdapter {
+        let opts = ClientOptions::builder().base_url("https://x").build();
+        let config = ProviderConfig::from_options("openai", opts);
+        let http =
+            HttpClient::new(&ClientOptions::builder().base_url("https://x").build()).unwrap();
+        OpenAiCompatAdapter::with_http(http, config, "openai", "OpenAI", full_caps())
+    }
+
+    #[test]
+    fn build_chat_body_passes_through_new_sampling_fields() {
+        let adapter = make_body_adapter();
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")])
+            .repetition_penalty(1.1)
+            .min_p(0.05)
+            .thinking_budget(4096)
+            .build();
+        let body = adapter.build_chat_body(&req, false);
+        // 对齐 Python v1：repetition_penalty 原名透传（OPENAI_COMPATIBLE_MAPPING），
+        // min_p / thinking_budget 原名透传（aggregation_platforms.py 直接写入 body）
+        assert_eq!(body["repetition_penalty"], json!(1.1));
+        assert_eq!(body["min_p"], json!(0.05));
+        assert_eq!(body["thinking_budget"], json!(4096));
+    }
+
+    #[test]
+    fn build_chat_body_removes_web_search_fields() {
+        let adapter = make_body_adapter();
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")])
+            .web_search(true)
+            .search_recency_filter("week")
+            .search_domain_filter(vec!["example.com".to_string()])
+            .build();
+        let body = adapter.build_chat_body(&req, false);
+        // 对齐 Python v1 OPENAI_COMPATIBLE_MAPPING：web_search 系列 rename 为 None（移除），
+        // 支持联网搜索的 provider 经 extra 透传或自有适配器处理
+        assert!(body.get("web_search").is_none());
+        assert!(body.get("search_recency_filter").is_none());
+        assert!(body.get("search_domain_filter").is_none());
+    }
+
+    #[test]
+    fn build_chat_body_non_stream_removes_stream_options() {
+        let adapter = make_body_adapter();
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")])
+            .stream_options(HashMap::from([("include_usage".to_string(), json!(true))]))
+            .build();
+        let body = adapter.build_chat_body(&req, false);
+        // stream_options 仅 stream=true 时生效（对齐 OpenAI API 行为），非流式移除
+        assert!(body.get("stream_options").is_none());
+    }
+
+    #[test]
+    fn build_chat_body_stream_merges_user_stream_options() {
+        let adapter = make_body_adapter();
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")])
+            .stream_options(HashMap::from([("custom_flag".to_string(), json!(true))]))
+            .build();
+        let body = adapter.build_chat_body(&req, true);
+        // 用户自定义 stream_options 合并保留，未显式指定 include_usage 时补 true
+        assert_eq!(body["stream_options"]["custom_flag"], json!(true));
+        assert_eq!(body["stream_options"]["include_usage"], json!(true));
+    }
+
+    #[test]
+    fn build_image_body_includes_new_fields() {
+        let adapter = make_body_adapter();
+        let req = ImageRequest::builder("flux", "a cat")
+            .sampler("euler_a")
+            .scheduler("karras")
+            .reference_strength(0.7)
+            .negative_prompts(vec!["blurry".to_string()])
+            .build();
+        let body = adapter.build_image_body(&req);
+        // 对齐 Python v1 ImageOptions：新字段原名透传到请求体
+        assert_eq!(body["sampler"], json!("euler_a"));
+        assert_eq!(body["scheduler"], json!("karras"));
+        assert_eq!(body["reference_strength"], json!(0.7));
+        assert_eq!(body["negative_prompts"], json!(["blurry"]));
+    }
+
+    #[tokio::test]
+    async fn chat_sends_new_sampling_fields_over_http() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/chat/completions")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "model": "gpt-4o",
+                "repetition_penalty": 1.1,
+                "min_p": 0.05,
+                "thinking_budget": 4096
+            })))
+            .with_status(200)
+            .with_body(json!({
+                "id": "x", "object": "chat.completion", "created": 1, "model": "gpt-4o",
+                "choices": [{"index": 0, "message": {"role":"assistant","content":"ok"}, "finish_reason": "stop"}]
+            }).to_string())
+            .create_async()
+            .await;
+
+        let adapter = make_adapter(&server, full_caps());
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")])
+            .repetition_penalty(1.1)
+            .min_p(0.05)
+            .thinking_budget(4096)
+            .build();
+        let _ = adapter.chat(req).await.unwrap();
+        mock.assert_async().await;
     }
 }

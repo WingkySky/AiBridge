@@ -48,6 +48,12 @@ pub struct ChatRequest {
     /// 频率惩罚（-2 到 2）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frequency_penalty: Option<f64>,
+    /// 重复惩罚（开源模型常用，>=0）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetition_penalty: Option<f64>,
+    /// Min-P 采样（0-1）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_p: Option<f64>,
     /// 随机种子
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
@@ -63,12 +69,27 @@ pub struct ChatRequest {
     /// 推理努力程度
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
+    /// 独立思考 token 预算（与 reasoning_effort 互补）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<u32>,
+    /// 是否启用联网搜索
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
+    /// 搜索时间过滤（day/week/month/year）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_recency_filter: Option<String>,
+    /// 搜索域名白名单
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_domain_filter: Option<Vec<String>>,
     /// 响应格式
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_format: Option<ResponseFormat>,
     /// 用户标识（用于风控/限流）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// 流式选项（如 include_usage），仅 stream=true 时生效
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<HashMap<String, serde_json::Value>>,
     /// 是否流式输出
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stream: bool,
@@ -99,13 +120,20 @@ impl ChatRequest {
                 n: None,
                 presence_penalty: None,
                 frequency_penalty: None,
+                repetition_penalty: None,
+                min_p: None,
                 seed: None,
                 tools: None,
                 tool_choice: None,
                 parallel_tool_calls: None,
                 reasoning_effort: None,
+                thinking_budget: None,
+                web_search: None,
+                search_recency_filter: None,
+                search_domain_filter: None,
                 response_format: None,
                 user: None,
+                stream_options: None,
                 stream: false,
                 extra: HashMap::new(),
             },
@@ -152,6 +180,14 @@ impl ChatRequestBuilder {
         self.inner.frequency_penalty = Some(p);
         self
     }
+    pub fn repetition_penalty(mut self, p: f64) -> Self {
+        self.inner.repetition_penalty = Some(p);
+        self
+    }
+    pub fn min_p(mut self, p: f64) -> Self {
+        self.inner.min_p = Some(p);
+        self
+    }
     pub fn seed(mut self, s: u64) -> Self {
         self.inner.seed = Some(s);
         self
@@ -172,12 +208,32 @@ impl ChatRequestBuilder {
         self.inner.reasoning_effort = Some(e);
         self
     }
+    pub fn thinking_budget(mut self, b: u32) -> Self {
+        self.inner.thinking_budget = Some(b);
+        self
+    }
+    pub fn web_search(mut self, w: bool) -> Self {
+        self.inner.web_search = Some(w);
+        self
+    }
+    pub fn search_recency_filter(mut self, f: impl Into<String>) -> Self {
+        self.inner.search_recency_filter = Some(f.into());
+        self
+    }
+    pub fn search_domain_filter(mut self, d: Vec<String>) -> Self {
+        self.inner.search_domain_filter = Some(d);
+        self
+    }
     pub fn response_format(mut self, f: ResponseFormat) -> Self {
         self.inner.response_format = Some(f);
         self
     }
     pub fn user(mut self, u: impl Into<String>) -> Self {
         self.inner.user = Some(u.into());
+        self
+    }
+    pub fn stream_options(mut self, opts: HashMap<String, serde_json::Value>) -> Self {
+        self.inner.stream_options = Some(opts);
         self
     }
     pub fn stream(mut self, s: bool) -> Self {
@@ -656,5 +712,79 @@ mod tests {
         let d = DeltaMessage::default();
         assert!(d.role.is_none());
         assert!(d.content.is_none());
+    }
+
+    #[test]
+    fn chat_request_new_fields_builder() {
+        let stream_opts = HashMap::from([("include_usage".to_string(), serde_json::json!(true))]);
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")])
+            .repetition_penalty(1.1)
+            .min_p(0.05)
+            .thinking_budget(4096)
+            .web_search(true)
+            .search_recency_filter("week")
+            .search_domain_filter(vec!["example.com".to_string()])
+            .stream_options(stream_opts.clone())
+            .build();
+        assert_eq!(req.repetition_penalty, Some(1.1));
+        assert_eq!(req.min_p, Some(0.05));
+        assert_eq!(req.thinking_budget, Some(4096));
+        assert_eq!(req.web_search, Some(true));
+        assert_eq!(req.search_recency_filter.as_deref(), Some("week"));
+        assert_eq!(
+            req.search_domain_filter,
+            Some(vec!["example.com".to_string()])
+        );
+        assert_eq!(req.stream_options, Some(stream_opts));
+    }
+
+    #[test]
+    fn chat_request_new_fields_serde_roundtrip() {
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")])
+            .repetition_penalty(1.1)
+            .min_p(0.05)
+            .thinking_budget(4096)
+            .web_search(true)
+            .search_recency_filter("week")
+            .search_domain_filter(vec!["example.com".to_string()])
+            .stream_options(HashMap::from([(
+                "include_usage".to_string(),
+                serde_json::json!(true),
+            )]))
+            .build();
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"repetition_penalty\":1.1"));
+        assert!(json.contains("\"min_p\":0.05"));
+        assert!(json.contains("\"thinking_budget\":4096"));
+        assert!(json.contains("\"web_search\":true"));
+        assert!(json.contains("\"search_recency_filter\":\"week\""));
+        assert!(json.contains("\"search_domain_filter\":[\"example.com\"]"));
+        assert!(json.contains("\"stream_options\":{\"include_usage\":true}"));
+        // 反序列化回读
+        let back: ChatRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.repetition_penalty, Some(1.1));
+        assert_eq!(back.min_p, Some(0.05));
+        assert_eq!(back.thinking_budget, Some(4096));
+        assert_eq!(back.web_search, Some(true));
+        assert_eq!(back.search_recency_filter.as_deref(), Some("week"));
+        assert_eq!(
+            back.search_domain_filter,
+            Some(vec!["example.com".to_string()])
+        );
+        assert!(back.stream_options.is_some());
+    }
+
+    #[test]
+    fn chat_request_new_fields_skip_when_none() {
+        let req = ChatRequest::builder("gpt-4o", vec![ChatMessage::user("hi")]).build();
+        let json = serde_json::to_string(&req).unwrap();
+        // 新字段全部为 None 时不出现在序列化结果中
+        assert!(!json.contains("repetition_penalty"));
+        assert!(!json.contains("min_p"));
+        assert!(!json.contains("thinking_budget"));
+        assert!(!json.contains("web_search"));
+        assert!(!json.contains("search_recency_filter"));
+        assert!(!json.contains("search_domain_filter"));
+        assert!(!json.contains("stream_options"));
     }
 }

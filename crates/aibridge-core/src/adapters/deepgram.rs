@@ -30,7 +30,7 @@
 //! ## 特性
 //!
 //! - `requires_api_key = true`（需 API Key）
-//! - `capabilities` 仅 `AudioTranscribe`（transcribe + translate 均走 `transcribe()` 方法）
+//! - `capabilities` 仅 `AudioTranscribe`（`translate()` 默认实现委托 `transcribe()`）
 //! - Deepgram 不支持翻译为英文（`translate=true` 时返回 Validation 错误，与 Python v1 一致：
 //!   Python 版 `DeepgramAdapter` 也未实现 translate）
 
@@ -1425,6 +1425,15 @@ mod tests {
             .build();
         let result = adapter.transcribe(req).await.unwrap();
         assert_eq!(result.text, "hello world");
+    }
+
+    #[tokio::test]
+    async fn translate_entry_returns_validation_via_default_impl() {
+        // translate() 默认实现置 translate=true 后委托 transcribe → Deepgram 返 Validation 错误
+        let adapter = make_adapter(None, Some("test-key"));
+        let req = TranscribeRequest::builder("nova-2", FileInput::bytes(vec![1, 2, 3])).build();
+        let err = adapter.translate(req).await.unwrap_err();
+        assert!(matches!(err, AibridgeError::Validation { .. }));
     }
 
     // ============ API key 缺失 ============

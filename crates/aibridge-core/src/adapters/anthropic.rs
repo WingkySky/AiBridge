@@ -16,13 +16,22 @@
 //!   - `system` 为顶层独立字段（从统一消息的 system 消息提取，不在 messages 中）
 //!   - `max_tokens` 必填（默认 1024）
 //!   - `stop` → `stop_sequences`（数组）
+//!   - `tools` → Anthropic 原生格式（name/description/input_schema）
+//!   - `tool_choice` → `{"type":"none"|"auto"|"any"}`；`parallel_tool_calls=false`
+//!     → `disable_parallel_tool_use: true`（语义取反，仅 auto/any 支持）
 //!   - `reasoning_effort` → `thinking`（对齐 Python ANTHROPIC_MAPPING 的 value_map）
-//! - 响应: `content[].text` 拼接为回复文本；`stop_reason` 映射为 finish_reason；
+//! - 工具调用消息: assistant 的 tool_calls → tool_use 内容块（arguments JSON 字符串
+//!   parse 为 input 对象）；tool 消息 → user 消息包 tool_result 内容块（连续多条合并）
+//! - 响应: `content[].text` 拼接为回复文本；`content[]` 中 tool_use 块解析为统一
+//!   ToolCall；`stop_reason` 映射为 finish_reason（tool_use → tool_calls）；
 //!   `usage.input_tokens` / `usage.output_tokens` 映射为 prompt / completion tokens
 //! - 流式: SSE，每行 `data: <json>`，JSON 含 `type` 字段：
 //!   - `content_block_delta`（delta.type==text_delta）→ 增量文本
 //!   - `message_delta`（delta.stop_reason）→ 结束原因
 //!   - `message_stop` → 流结束
+//!   - 注意：流式 tool_use 相关块（content_block_start 的 tool_use、input_json_delta）
+//!     暂不产出增量（Python v1 流式未支持工具调用，对齐其行为）；工具调用请使用
+//!     非流式 chat。流式结束时的 stop_reason=tool_use 仍会映射为 finish_reason=tool_calls
 //! - Models: `GET /models`，响应 `{"data":[{"id":...,"display_name":...}]}`
 //!
 //! 官方文档: <https://docs.anthropic.com/en/api/messages>
@@ -42,7 +51,10 @@ use crate::model::chat::{
     ChoiceMessage, ContentPart, DeltaMessage, UserContent,
 };
 use crate::model::common::{infer_model_type, ModelInfo, ModelType};
-use crate::model::options::{ParameterMapping, ReasoningEffort, StopSeq};
+use crate::model::options::{
+    ParameterMapping, ReasoningEffort, StopSeq, ToolCall, ToolCallFunction, ToolChoice,
+    ToolDefinition,
+};
 use crate::util;
 
 // ==================== 默认配置 ====================
@@ -63,27 +75,32 @@ const DEFAULT_MAX_TOKENS: u32 = 1024;
 /// Anthropic 参数映射
 ///
 /// 对应 Python v1 `ANTHROPIC_MAPPING`。
-/// Rust 的 `ParameterMapping` 仅支持 rename_map（无 value_map），故 `reasoning_effort → thinking`
-/// 的值映射在 `build_chat_body` 中特殊处理（参照 DeepSeek 自动注入 thinking 的模式）。
+/// `reasoning_effort → thinking` 的值映射在 `build_chat_body` 中特殊处理
+/// （参照 DeepSeek 自动注入 thinking 的模式；value_map 语义见 `ParameterMapping`）。
 ///
 /// rename_map：
 /// - `stop` → `stop_sequences`（其余参数 max_tokens / top_p / top_k / temperature 原名透传）
 pub fn anthropic_mapping() -> ParameterMapping {
     let mut rename: HashMap<String, Option<String>> = HashMap::new();
     rename.insert("stop".into(), Some("stop_sequences".into()));
-    ParameterMapping { rename_map: rename }
+    ParameterMapping {
+        rename_map: rename,
+        ..Default::default()
+    }
 }
 
 /// Anthropic 支持的能力集合
 ///
-/// 对齐 Python v1 `supported_capabilities`（CHAT / CHAT_STREAM / VISION）。
-/// Rust 未声明 ToolCall：工具调用的完整请求体/响应解析未在本阶段实现
-/// （tool 消息按 user/tool_result 简化转换，保证不丢信息但不声明能力）。
+/// 对齐 Python v1 `supported_capabilities`（CHAT / CHAT_STREAM / VISION / TOOL_CALL）。
+/// ToolCall：tools/tool_choice 请求体构造、tool_use/tool_result 消息转换与
+/// 响应 tool_use 块解析均已实现（流式 tool_use 增量未支持，对齐 Python v1，
+/// 详见模块文档）。
 fn anthropic_capabilities() -> CapabilitySet {
     let mut caps = CapabilitySet::new();
     caps.insert(Capabilities::Chat);
     caps.insert(Capabilities::ChatStream);
     caps.insert(Capabilities::Vision);
+    caps.insert(Capabilities::ToolCall);
     caps
 }
 
@@ -243,9 +260,11 @@ impl AnthropicAdapter {
     /// - system 消息 → 提取为顶层 `system` 字段（多条用 `\n` 拼接，Python 取最后一条；
     ///   Rust 改为拼接以保留全部 system 上下文）
     /// - user 消息 → `{"role":"user","content":...}`（纯文本用字符串，多模态用 content blocks）
-    /// - assistant 消息 → `{"role":"assistant","content":...}`（tool_calls 暂未完整序列化为
-    ///   tool_use 块，本阶段聚焦文本对话）
-    /// - tool 消息 → `{"role":"user","content":[{"type":"tool_result",...}]}`（Anthropic 原生格式）
+    /// - assistant 消息 → `{"role":"assistant","content":...}`；带 tool_calls 时 content 为
+    ///   blocks 数组（文本块在前，每个 ToolCall 转一个 tool_use 块）
+    /// - tool 消息 → `{"role":"user","content":[{"type":"tool_result",...}]}`（Anthropic 原生格式）；
+    ///   连续多条 tool 消息合并进同一条 user 消息（Anthropic 要求角色交替，且同一轮
+    ///   tool_use 的所有 tool_result 须放在紧随其后的同一条 user 消息中）
     ///
     /// 多模态图片：
     /// - `data:` URI → `{"type":"image","source":{"type":"base64","media_type":...,"data":...}}`
@@ -270,23 +289,31 @@ impl AnthropicAdapter {
                     };
                     converted.push(json!({"role": "user", "content": c}));
                 }
-                ChatMessage::Assistant { content, .. } => {
-                    let text = content.clone().unwrap_or_default();
-                    converted.push(json!({"role": "assistant", "content": text}));
+                ChatMessage::Assistant {
+                    content,
+                    tool_calls,
+                } => {
+                    converted.push(convert_assistant_message(content, tool_calls));
                 }
                 ChatMessage::Tool {
                     tool_call_id,
                     content,
                 } => {
                     // Anthropic 工具结果用 user 角色 + tool_result content block
-                    converted.push(json!({
-                        "role": "user",
-                        "content": [{
-                            "type": "tool_result",
-                            "tool_use_id": tool_call_id,
-                            "content": content
-                        }]
-                    }));
+                    let block = json!({
+                        "type": "tool_result",
+                        "tool_use_id": tool_call_id,
+                        "content": content
+                    });
+                    // 连续 tool 消息合并进上一条 tool_result user 消息
+                    match converted.last_mut() {
+                        Some(last) if is_tool_result_message(last) => {
+                            if let Some(arr) = last["content"].as_array_mut() {
+                                arr.push(block);
+                            }
+                        }
+                        _ => converted.push(json!({"role": "user", "content": [block]})),
+                    }
                 }
             }
         }
@@ -309,6 +336,9 @@ impl AnthropicAdapter {
     /// - `system`：从 system 消息提取（若存在）
     /// - `temperature` / `top_p` / `top_k`：透传
     /// - `stop` → `stop_sequences`（统一为数组）
+    /// - `tools` → Anthropic 原生格式（name/description/input_schema）
+    /// - `tool_choice` → `{"type":"none"|"auto"|"any"}`；`parallel_tool_calls`
+    ///   语义取反为 `disable_parallel_tool_use`
     /// - `reasoning_effort` → `thinking`（对齐 Python ANTHROPIC_MAPPING value_map）
     /// - `extra` 透传到顶层
     fn build_chat_body(req: &ChatRequest, stream: bool) -> Value {
@@ -344,8 +374,23 @@ impl AnthropicAdapter {
             body["stop_sequences"] = json!(seqs);
         }
 
+        // tools → Anthropic 原生 tools 参数（展开 OpenAI 风格 type/function 包装）
+        if let Some(tools) = &req.tools {
+            let converted: Vec<Value> = tools.iter().filter_map(convert_tool_definition).collect();
+            if !converted.is_empty() {
+                body["tools"] = json!(converted);
+            }
+        }
+        // tool_choice → {"type":...}（含 parallel_tool_calls → disable_parallel_tool_use 取反）
+        if let Some(tool_choice) = build_tool_choice(&req.tool_choice, req.parallel_tool_calls) {
+            body["tool_choice"] = tool_choice;
+        }
+
         // reasoning_effort → thinking（对齐 Python ANTHROPIC_MAPPING.value_map）
-        // 仅在未通过 extra 显式设置 thinking 时注入
+        // 仅在未通过 extra 显式设置 thinking 时注入。
+        // 注：本函数手工逐字段构建 body，架构上不经 ParameterMapping::apply
+        // （anthropic_mapping() 仅保留 rename 规则作参考与测试），故该 value_map
+        // 不迁移进 anthropic_mapping()，保持此处硬编码注入。
         if let Some(effort) = req.reasoning_effort {
             if body.get("thinking").is_none() {
                 if let Some(thinking) = thinking_for_effort(effort) {
@@ -374,13 +419,15 @@ impl AnthropicAdapter {
     ///  "content":[{"type":"text","text":"Hello"}],
     ///  "usage":{"input_tokens":3,"output_tokens":2}}
     /// ```
-    /// 拼接所有 type==text 的 content block 文本；stop_reason 映射为 finish_reason。
-    /// 对应 Python v1 `AnthropicAdapter._parse_response`。
+    /// 拼接所有 type==text 的 content block 文本；type==tool_use 的块解析为统一
+    /// ToolCall（input 对象序列化为 JSON 字符串存入 arguments）；stop_reason 映射为
+    /// finish_reason（tool_use → tool_calls）。
+    /// 对应 Python v1 `AnthropicAdapter._parse_response`（Python 未解析 tool_use，此处补齐）。
     fn parse_chat_completion(value: &Value, fallback_model: &str) -> Result<ChatCompletion> {
+        let blocks = value.get("content").and_then(|v| v.as_array());
+
         // 拼接所有 text 内容块
-        let content: String = value
-            .get("content")
-            .and_then(|v| v.as_array())
+        let content: String = blocks
             .map(|arr| {
                 arr.iter()
                     .filter_map(|block| {
@@ -396,6 +443,11 @@ impl AnthropicAdapter {
                     .collect::<Vec<_>>()
                     .join("")
             })
+            .unwrap_or_default();
+
+        // 提取 tool_use 内容块 → 统一 ToolCall
+        let tool_calls: Vec<ToolCall> = blocks
+            .map(|arr| arr.iter().filter_map(parse_tool_use_block).collect())
             .unwrap_or_default();
 
         let stop_reason = value.get("stop_reason").and_then(|v| v.as_str());
@@ -423,8 +475,17 @@ impl AnthropicAdapter {
                 index: 0,
                 message: ChoiceMessage {
                     role: "assistant".to_string(),
-                    content: Some(content),
-                    tool_calls: None,
+                    // 纯工具调用响应（无文本）时 content 为 None，对齐 OpenAI 语义
+                    content: if content.is_empty() && !tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(content)
+                    },
+                    tool_calls: if tool_calls.is_empty() {
+                        None
+                    } else {
+                        Some(tool_calls)
+                    },
                 },
                 finish_reason,
             }],
@@ -443,6 +504,9 @@ impl AnthropicAdapter {
     /// - 其他（message_start / content_block_start / content_block_stop / ping）→ None（跳过）
     ///
     /// 对应 Python v1 `AnthropicAdapter._parse_stream_chunk`。
+    /// 注意：tool_use 相关事件（content_block_start 的 tool_use 块、input_json_delta）
+    /// 同样跳过不产出增量——Python v1 流式未支持工具调用，对齐其行为；
+    /// message_delta 的 stop_reason=tool_use 仍会映射为 finish_reason=tool_calls。
     fn parse_chunk(value: &Value, fallback_model: &str) -> Option<ChatCompletionChunk> {
         let event_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
         let chunk_id = value
@@ -657,6 +721,147 @@ impl Adapter for AnthropicAdapter {
 
 // ==================== 辅助函数 ====================
 
+/// 转换 assistant 消息为 Anthropic 格式
+///
+/// - 无 tool_calls：保持字符串 content（与纯文本对话一致）
+/// - 有 tool_calls：content 为 blocks 数组，文本块（若有且非空）在前，
+///   每个 ToolCall 转为 `{"type":"tool_use","id","name","input"}` 块
+fn convert_assistant_message(
+    content: &Option<String>,
+    tool_calls: &Option<Vec<ToolCall>>,
+) -> Value {
+    let calls: &[ToolCall] = tool_calls.as_deref().unwrap_or(&[]);
+    if calls.is_empty() {
+        let text = content.clone().unwrap_or_default();
+        return json!({"role": "assistant", "content": text});
+    }
+
+    let mut blocks: Vec<Value> = Vec::new();
+    if let Some(text) = content {
+        if !text.is_empty() {
+            blocks.push(json!({"type": "text", "text": text}));
+        }
+    }
+    for call in calls {
+        blocks.push(json!({
+            "type": "tool_use",
+            "id": call.id,
+            "name": call.function.name,
+            "input": parse_tool_arguments(&call.function.arguments),
+        }));
+    }
+    json!({"role": "assistant", "content": blocks})
+}
+
+/// 判断一条已转换消息是否为 tool_result user 消息（用于连续 tool 消息合并）
+///
+/// 判定条件：role==user 且 content 为非空数组、所有元素均为 tool_result 块
+/// （排除普通多模态 user 消息与空数组的误判）。
+fn is_tool_result_message(v: &Value) -> bool {
+    if v.get("role").and_then(|r| r.as_str()) != Some("user") {
+        return false;
+    }
+    v.get("content")
+        .and_then(|c| c.as_array())
+        .map(|arr| {
+            !arr.is_empty()
+                && arr
+                    .iter()
+                    .all(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_result"))
+        })
+        .unwrap_or(false)
+}
+
+/// 将 ToolCall 的 arguments（JSON 字符串）解析为 Anthropic tool_use 的 input 对象
+///
+/// Anthropic 要求 input 必须是 JSON 对象；非法 JSON 或非对象值兜底为空对象
+/// （保留调用本身，不丢 id/name 信息）。
+fn parse_tool_arguments(arguments: &str) -> Value {
+    match serde_json::from_str::<Value>(arguments) {
+        Ok(v) if v.is_object() => v,
+        _ => json!({}),
+    }
+}
+
+/// 转换统一 ToolDefinition 为 Anthropic tools 参数格式
+///
+/// OpenAI 风格 `{"type":"function","function":{name,description,parameters}}`
+/// → Anthropic 原生 `{"name","description","input_schema"}`。
+/// parameters 缺省时兜底最小合法 schema（Anthropic 要求 input_schema 必填）；
+/// 无 function 定义的工具（如 web_search）无法映射为 Anthropic 自定义工具，跳过。
+fn convert_tool_definition(tool: &ToolDefinition) -> Option<Value> {
+    let func = tool.function.as_ref()?;
+    let mut t = json!({"name": func.name});
+    if let Some(desc) = &func.description {
+        t["description"] = json!(desc);
+    }
+    t["input_schema"] = func
+        .parameters
+        .clone()
+        .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+    Some(t)
+}
+
+/// 构建 Anthropic tool_choice 参数
+///
+/// 映射规则：
+/// - ToolChoice::None → `{"type":"none"}`
+/// - ToolChoice::Auto → `{"type":"auto"}`
+/// - ToolChoice::Required → `{"type":"any"}`（强制调用至少一个工具）
+/// - parallel_tool_calls=false → `disable_parallel_tool_use: true`（语义取反；
+///   仅 auto/any 支持该字段，none 不支持）
+/// - 未设置 tool_choice 但 parallel_tool_calls=false → 注入 `{"type":"auto",...}`
+///   （Anthropic 提供 tools 时默认即 auto）
+/// - parallel_tool_calls=true 为 Anthropic 默认行为，不显式输出该字段
+fn build_tool_choice(choice: &Option<ToolChoice>, parallel: Option<bool>) -> Option<Value> {
+    // 仅 false 需要显式取反；true/None 均为默认行为
+    let disable_parallel = matches!(parallel, Some(false));
+
+    let with_disable = |type_str: &str| {
+        let mut v = json!({"type": type_str});
+        if disable_parallel {
+            v["disable_parallel_tool_use"] = json!(true);
+        }
+        v
+    };
+
+    match choice {
+        Some(ToolChoice::None) => Some(json!({"type": "none"})),
+        Some(ToolChoice::Auto) => Some(with_disable("auto")),
+        Some(ToolChoice::Required) => Some(with_disable("any")),
+        None if disable_parallel => Some(with_disable("auto")),
+        None => None,
+    }
+}
+
+/// 解析 Anthropic 响应 content 中的 tool_use 块 → 统一 ToolCall
+///
+/// `{"type":"tool_use","id","name","input":{...}}` → ToolCall（input 对象序列化为
+/// JSON 字符串存入 arguments，对齐 OpenAI 统一格式；input 缺省兜底 `{}`）。
+/// 非 tool_use 块返回 None。
+fn parse_tool_use_block(block: &Value) -> Option<ToolCall> {
+    if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+        return None;
+    }
+    let input = block.get("input").cloned().unwrap_or_else(|| json!({}));
+    Some(ToolCall {
+        id: block
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        tool_type: "function".to_string(),
+        function: ToolCallFunction {
+            name: block
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            arguments: input.to_string(),
+        },
+    })
+}
+
 /// 将统一多模态内容部件转换为 Anthropic content block
 ///
 /// - Text → `{"type":"text","text":...}`
@@ -844,7 +1049,10 @@ mod tests {
     use crate::config::ClientOptions;
     use crate::http::HttpClient;
     use crate::model::image::ImageRequest;
-    use crate::model::options::{EmbedInput, EmbedRequest, ReasoningEffort};
+    use crate::model::options::{
+        EmbedInput, EmbedRequest, FunctionDefinition, ReasoningEffort, ToolCall, ToolCallFunction,
+        ToolChoice, ToolDefinition,
+    };
     use crate::model::video::VideoRequest;
     use mockito::Server;
     use std::collections::HashMap;
@@ -1647,6 +1855,429 @@ mod tests {
         };
         let err = adapter.embed(req).await.unwrap_err();
         assert!(matches!(err, AibridgeError::UnsupportedCapability { .. }));
+    }
+
+    // ==================== 工具调用（ToolCall）====================
+
+    /// 构造测试用天气工具定义（OpenAI 风格 function 包装）
+    fn weather_tool() -> ToolDefinition {
+        ToolDefinition::function(FunctionDefinition {
+            name: "get_weather".into(),
+            description: Some("获取指定城市的天气".into()),
+            parameters: Some(json!({
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+                "required": ["city"]
+            })),
+        })
+    }
+
+    /// 构造测试用 ToolCall
+    fn make_tool_call(id: &str, name: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: id.into(),
+            tool_type: "function".into(),
+            function: ToolCallFunction {
+                name: name.into(),
+                arguments: arguments.into(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn capabilities_include_tool_call() {
+        let server = Server::new_async().await;
+        let adapter = make_anthropic(&server);
+        assert!(adapter.capabilities().contains(&Capabilities::ToolCall));
+    }
+
+    #[test]
+    fn build_chat_body_converts_tools_to_anthropic_format() {
+        // OpenAI 风格 {"type":"function","function":{...}} → Anthropic 原生
+        // {"name","description","input_schema"}（无 type/function 包装）
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .max_tokens(100)
+            .tools(vec![weather_tool()])
+            .build();
+        let body = AnthropicAdapter::build_chat_body(&req, false);
+        let tools = body["tools"].as_array().expect("tools 应为数组");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["name"], "get_weather");
+        assert_eq!(tools[0]["description"], "获取指定城市的天气");
+        assert_eq!(tools[0]["input_schema"]["type"], "object");
+        assert_eq!(
+            tools[0]["input_schema"]["properties"]["city"]["type"],
+            "string"
+        );
+        assert!(tools[0].get("type").is_none());
+        assert!(tools[0].get("function").is_none());
+    }
+
+    #[test]
+    fn build_chat_body_tool_without_parameters_gets_minimal_schema() {
+        // parameters 缺省时兜底最小合法 schema（Anthropic 要求 input_schema 必填）
+        let tool = ToolDefinition::function(FunctionDefinition {
+            name: "ping".into(),
+            description: None,
+            parameters: None,
+        });
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .max_tokens(100)
+            .tools(vec![tool])
+            .build();
+        let body = AnthropicAdapter::build_chat_body(&req, false);
+        let tools = body["tools"].as_array().expect("tools 应为数组");
+        assert_eq!(tools[0]["name"], "ping");
+        assert!(tools[0].get("description").is_none());
+        assert_eq!(
+            tools[0]["input_schema"],
+            json!({"type": "object", "properties": {}})
+        );
+    }
+
+    #[test]
+    fn build_chat_body_tool_choice_variants() {
+        // None → none、Auto → auto、Required → any（强制调用至少一个工具）
+        for (choice, expected_type) in [
+            (ToolChoice::None, "none"),
+            (ToolChoice::Auto, "auto"),
+            (ToolChoice::Required, "any"),
+        ] {
+            let req =
+                ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+                    .max_tokens(100)
+                    .tools(vec![weather_tool()])
+                    .tool_choice(choice)
+                    .build();
+            let body = AnthropicAdapter::build_chat_body(&req, false);
+            assert_eq!(
+                body["tool_choice"]["type"],
+                json!(expected_type),
+                "tool_choice 应映射为 type={expected_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_chat_body_parallel_tool_calls_false_disables_parallel() {
+        // parallel_tool_calls=false → disable_parallel_tool_use=true（语义取反）
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .max_tokens(100)
+            .tools(vec![weather_tool()])
+            .tool_choice(ToolChoice::Auto)
+            .parallel_tool_calls(false)
+            .build();
+        let body = AnthropicAdapter::build_chat_body(&req, false);
+        assert_eq!(body["tool_choice"]["type"], "auto");
+        assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
+    }
+
+    #[test]
+    fn build_chat_body_parallel_tool_calls_false_without_tool_choice_injects_auto() {
+        // 未设置 tool_choice 时，parallel_tool_calls=false 注入 auto + disable
+        //（Anthropic 提供 tools 时默认即 auto）
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .max_tokens(100)
+            .tools(vec![weather_tool()])
+            .parallel_tool_calls(false)
+            .build();
+        let body = AnthropicAdapter::build_chat_body(&req, false);
+        assert_eq!(body["tool_choice"]["type"], "auto");
+        assert_eq!(body["tool_choice"]["disable_parallel_tool_use"], true);
+    }
+
+    #[test]
+    fn build_chat_body_parallel_tool_calls_true_omits_disable() {
+        // parallel_tool_calls=true 为 Anthropic 默认行为，不显式输出该字段
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .max_tokens(100)
+            .tools(vec![weather_tool()])
+            .tool_choice(ToolChoice::Auto)
+            .parallel_tool_calls(true)
+            .build();
+        let body = AnthropicAdapter::build_chat_body(&req, false);
+        assert_eq!(body["tool_choice"]["type"], "auto");
+        assert!(body["tool_choice"].get("disable_parallel_tool_use").is_none());
+    }
+
+    #[test]
+    fn build_chat_body_tool_choice_none_ignores_parallel() {
+        // tool_choice=none 不支持 disable_parallel_tool_use（Anthropic 协议限制）
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .max_tokens(100)
+            .tools(vec![weather_tool()])
+            .tool_choice(ToolChoice::None)
+            .parallel_tool_calls(false)
+            .build();
+        let body = AnthropicAdapter::build_chat_body(&req, false);
+        assert_eq!(body["tool_choice"]["type"], "none");
+        assert!(body["tool_choice"].get("disable_parallel_tool_use").is_none());
+    }
+
+    #[test]
+    fn build_chat_body_no_tools_omits_tools_and_tool_choice() {
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .max_tokens(100)
+            .build();
+        let body = AnthropicAdapter::build_chat_body(&req, false);
+        assert!(body.get("tools").is_none());
+        assert!(body.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn convert_messages_assistant_tool_calls_to_tool_use_blocks() {
+        // assistant 带 tool_calls → content blocks：文本块在前，tool_use 块在后；
+        // arguments（JSON 字符串）parse 为 input 对象
+        let msgs = vec![
+            ChatMessage::user("北京天气?"),
+            ChatMessage::Assistant {
+                content: Some("我来查一下".into()),
+                tool_calls: Some(vec![make_tool_call(
+                    "toolu_1",
+                    "get_weather",
+                    "{\"city\":\"Beijing\"}",
+                )]),
+            },
+        ];
+        let (converted, _) = AnthropicAdapter::convert_messages(&msgs);
+        assert_eq!(converted.len(), 2);
+        assert_eq!(converted[1]["role"], "assistant");
+        let content = converted[1]["content"]
+            .as_array()
+            .expect("assistant 带 tool_calls 时 content 应为 blocks 数组");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "我来查一下");
+        assert_eq!(content[1]["type"], "tool_use");
+        assert_eq!(content[1]["id"], "toolu_1");
+        assert_eq!(content[1]["name"], "get_weather");
+        assert_eq!(content[1]["input"]["city"], "Beijing");
+    }
+
+    #[test]
+    fn convert_messages_assistant_tool_calls_without_text() {
+        // content 为 None：只有 tool_use 块，不产生空文本块
+        let msgs = vec![ChatMessage::Assistant {
+            content: None,
+            tool_calls: Some(vec![make_tool_call("toolu_1", "ping", "{}")]),
+        }];
+        let (converted, _) = AnthropicAdapter::convert_messages(&msgs);
+        let content = converted[0]["content"].as_array().expect("应为 blocks 数组");
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "tool_use");
+        assert_eq!(content[0]["input"], json!({}));
+    }
+
+    #[test]
+    fn convert_messages_assistant_tool_calls_invalid_arguments_fallback_empty_object() {
+        // arguments 非法 JSON → input 兜底空对象（Anthropic 要求 input 必须为对象）
+        let msgs = vec![ChatMessage::Assistant {
+            content: None,
+            tool_calls: Some(vec![make_tool_call("toolu_1", "ping", "not-json")]),
+        }];
+        let (converted, _) = AnthropicAdapter::convert_messages(&msgs);
+        let content = converted[0]["content"].as_array().expect("应为 blocks 数组");
+        assert_eq!(content[0]["input"], json!({}));
+    }
+
+    #[test]
+    fn convert_messages_tool_result_becomes_user_message() {
+        // tool 消息 → user 消息包 tool_result 内容块（Anthropic 原生格式）
+        let msgs = vec![
+            ChatMessage::assistant("我来查一下"),
+            ChatMessage::tool("toolu_1", "晴天 25°C"),
+        ];
+        let (converted, _) = AnthropicAdapter::convert_messages(&msgs);
+        assert_eq!(converted.len(), 2);
+        assert_eq!(converted[1]["role"], "user");
+        let content = converted[1]["content"].as_array().expect("应为数组");
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "tool_result");
+        assert_eq!(content[0]["tool_use_id"], "toolu_1");
+        assert_eq!(content[0]["content"], "晴天 25°C");
+    }
+
+    #[test]
+    fn convert_messages_consecutive_tool_results_merged_into_one_user_message() {
+        // 连续多个 tool 消息合并为一条 user 消息：Anthropic 要求角色交替，
+        // 且同一轮 tool_use 的所有 tool_result 须放在紧随其后的同一条 user 消息中
+        let msgs = vec![
+            ChatMessage::Assistant {
+                content: None,
+                tool_calls: Some(vec![
+                    make_tool_call("toolu_1", "get_weather", "{\"city\":\"Beijing\"}"),
+                    make_tool_call("toolu_2", "get_weather", "{\"city\":\"Shanghai\"}"),
+                ]),
+            },
+            ChatMessage::tool("toolu_1", "晴天"),
+            ChatMessage::tool("toolu_2", "雨天"),
+            ChatMessage::user("谢谢"),
+        ];
+        let (converted, _) = AnthropicAdapter::convert_messages(&msgs);
+        assert_eq!(converted.len(), 3);
+        assert_eq!(converted[1]["role"], "user");
+        let content = converted[1]["content"].as_array().expect("应为数组");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["tool_use_id"], "toolu_1");
+        assert_eq!(content[0]["content"], "晴天");
+        assert_eq!(content[1]["tool_use_id"], "toolu_2");
+        assert_eq!(content[1]["content"], "雨天");
+        // 后续普通 user 消息不受影响
+        assert_eq!(converted[2]["role"], "user");
+        assert_eq!(converted[2]["content"], "谢谢");
+    }
+
+    #[test]
+    fn parse_chat_completion_parses_tool_use_blocks() {
+        // 响应 content 中的 tool_use 块 → 统一 ToolCall（input 对象序列化为 JSON 字符串）；
+        // stop_reason "tool_use" → finish_reason "tool_calls"
+        let v = json!({
+            "id": "msg_tool",
+            "model": "claude-3-5-sonnet-20241022",
+            "content": [
+                {"type": "text", "text": "我来查一下天气。"},
+                {"type": "tool_use", "id": "toolu_01A", "name": "get_weather", "input": {"city": "Beijing"}}
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 20, "output_tokens": 10}
+        });
+        let cc = AnthropicAdapter::parse_chat_completion(&v, "fallback").unwrap();
+        assert_eq!(
+            cc.choices[0].message.content.as_deref(),
+            Some("我来查一下天气。")
+        );
+        let tool_calls = cc.choices[0]
+            .message
+            .tool_calls
+            .as_ref()
+            .expect("应有 tool_calls");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "toolu_01A");
+        assert_eq!(tool_calls[0].tool_type, "function");
+        assert_eq!(tool_calls[0].function.name, "get_weather");
+        assert_eq!(tool_calls[0].function.arguments, "{\"city\":\"Beijing\"}");
+        assert_eq!(cc.choices[0].finish_reason.as_deref(), Some("tool_calls"));
+    }
+
+    #[test]
+    fn parse_chat_completion_tool_use_only_content_is_none() {
+        // 纯 tool_use 响应（无文本块）：content 为 None（对齐 OpenAI 纯工具调用语义）
+        let v = json!({
+            "id": "msg_tool2",
+            "content": [
+                {"type": "tool_use", "id": "toolu_1", "name": "ping", "input": {}}
+            ],
+            "stop_reason": "tool_use"
+        });
+        let cc = AnthropicAdapter::parse_chat_completion(&v, "m").unwrap();
+        assert!(cc.choices[0].message.content.is_none());
+        let tool_calls = cc.choices[0]
+            .message
+            .tool_calls
+            .as_ref()
+            .expect("应有 tool_calls");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].function.arguments, "{}");
+    }
+
+    #[tokio::test]
+    async fn chat_with_tools_sends_anthropic_format_and_parses_tool_use() {
+        // 端到端：请求体 tools/tool_choice 为 Anthropic 原生格式，响应 tool_use 正确解析
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/messages")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "tools": [{
+                    "name": "get_weather",
+                    "description": "获取指定城市的天气",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"]
+                    }
+                }],
+                "tool_choice": {"type": "auto"}
+            })))
+            .with_status(200)
+            .with_body(
+                json!({
+                    "id": "msg_tc",
+                    "model": "claude-3-5-sonnet-20241022",
+                    "content": [
+                        {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Beijing"}}
+                    ],
+                    "stop_reason": "tool_use",
+                    "usage": {"input_tokens": 30, "output_tokens": 12}
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let adapter = make_anthropic(&server);
+        let req = ChatRequest::builder(
+            "claude-3-5-sonnet-20241022",
+            vec![ChatMessage::user("北京天气?")],
+        )
+        .max_tokens(200)
+        .tools(vec![weather_tool()])
+        .tool_choice(ToolChoice::Auto)
+        .build();
+        let resp = adapter.chat(req).await.expect("chat 应成功");
+        let tool_calls = resp.choices[0]
+            .message
+            .tool_calls
+            .as_ref()
+            .expect("应有 tool_calls");
+        assert_eq!(tool_calls[0].id, "toolu_1");
+        assert_eq!(tool_calls[0].function.name, "get_weather");
+        assert_eq!(tool_calls[0].function.arguments, "{\"city\":\"Beijing\"}");
+        assert_eq!(resp.choices[0].finish_reason.as_deref(), Some("tool_calls"));
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn chat_tool_conversation_sends_tool_use_and_tool_result() {
+        // 完整工具对话回路：assistant(tool_use) + tool 结果回传 → Anthropic 消息格式
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/messages")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "messages": [
+                    {"role": "user", "content": "北京天气?"},
+                    {"role": "assistant", "content": [
+                        {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Beijing"}}
+                    ]},
+                    {"role": "user", "content": [
+                        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "晴天 25°C"}
+                    ]}
+                ]
+            })))
+            .with_status(200)
+            .with_body(anthropic_chat_body().to_string())
+            .create_async()
+            .await;
+
+        let adapter = make_anthropic(&server);
+        let req = ChatRequest::builder(
+            "claude-3-5-sonnet-20241022",
+            vec![
+                ChatMessage::user("北京天气?"),
+                ChatMessage::Assistant {
+                    content: None,
+                    tool_calls: Some(vec![make_tool_call(
+                        "toolu_1",
+                        "get_weather",
+                        "{\"city\":\"Beijing\"}",
+                    )]),
+                },
+                ChatMessage::tool("toolu_1", "晴天 25°C"),
+            ],
+        )
+        .max_tokens(200)
+        .build();
+        let _ = adapter.chat(req).await.expect("chat 应成功");
+        mock.assert_async().await;
     }
 
     // ==================== 辅助函数单元测试 ====================

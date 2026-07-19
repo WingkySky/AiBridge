@@ -21,6 +21,8 @@
 //! ## 特性（v1.3.3 保留）
 //!
 //! - `requires_api_key = true`（需 AssemblyAI API Key）
+//! - `capabilities`：`AudioTranscribe` + `AudioTranslate`（translate 复用转写管线，
+//!   task 标记为 "translate"；AssemblyAI 不直接支持音频翻译，结果语言由 language_code 决定）
 //! - `speech_model`：best（默认，最高准确率）/ nano（轻量低成本）
 //! - 高级参数：speaker_labels / sentiment_analysis / auto_chapters / entity_detection /
 //!   redact_pii / word_boost / filter_profanity 等，通过 `extra` 透传
@@ -448,6 +450,8 @@ impl Adapter for AssemblyAiAdapter {
     fn capabilities(&self) -> CapabilitySet {
         let mut caps = CapabilitySet::new();
         caps.insert(Capabilities::AudioTranscribe);
+        // translate 复用转写管线（task 标记为 "translate"），声明 AudioTranslate 能力
+        caps.insert(Capabilities::AudioTranslate);
         caps
     }
 
@@ -628,10 +632,12 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_contains_only_transcribe() {
+    fn capabilities_contains_transcribe_and_translate() {
         let adapter = make_adapter(None);
         let caps = adapter.capabilities();
         assert!(caps.contains(&Capabilities::AudioTranscribe));
+        // translate 复用转写管线（task 标记为 translate），声明 AudioTranslate 能力
+        assert!(caps.contains(&Capabilities::AudioTranslate));
         assert!(!caps.contains(&Capabilities::AudioSpeech));
         assert!(!caps.contains(&Capabilities::Chat));
         assert!(!caps.contains(&Capabilities::ImageGenerate));
@@ -1413,6 +1419,39 @@ mod tests {
             .build();
         let result = adapter.transcribe(req).await.unwrap();
         assert_eq!(result.text, "translated");
+        assert_eq!(result.task, "translate");
+    }
+
+    #[tokio::test]
+    async fn translate_entry_full_flow_sets_translate_task() {
+        // translate() 默认实现置 translate=true 后委托 transcribe → 完整三段式流程，task 为 translate
+        let mut server = mockito::Server::new_async().await;
+        server
+            .mock("POST", UPLOAD_PATH)
+            .with_status(200)
+            .with_body(r#"{"upload_url":"https://up.example.com/u"}"#)
+            .create_async()
+            .await;
+        server
+            .mock("POST", TRANSCRIPT_PATH)
+            .with_status(200)
+            .with_body(r#"{"id":"t-tr2"}"#)
+            .create_async()
+            .await;
+        server
+            .mock("GET", "/transcript/t-tr2")
+            .with_status(200)
+            .with_body(r#"{"status":"completed","text":"translated via entry","language_code":"en"}"#)
+            .create_async()
+            .await;
+
+        let adapter = make_adapter(Some(server.url()));
+        // 注意：请求本身 translate=false，由 translate() 默认实现置位
+        let req = TranscribeRequest::builder("best", FileInput::bytes(vec![1]))
+            .extra("polling_interval", 0.001)
+            .build();
+        let result = adapter.translate(req).await.unwrap();
+        assert_eq!(result.text, "translated via entry");
         assert_eq!(result.task, "translate");
     }
 

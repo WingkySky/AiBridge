@@ -63,6 +63,7 @@ impl EchoAdapter {
         caps.insert(Capabilities::VideoImage2Video);
         caps.insert(Capabilities::Embedding);
         caps.insert(Capabilities::AudioTranscribe);
+        caps.insert(Capabilities::AudioTranslate);
         caps.insert(Capabilities::AudioSpeech);
         caps.insert(Capabilities::ListVoices);
         caps
@@ -398,10 +399,10 @@ impl Adapter for EchoAdapter {
         })
     }
 
-    /// 语音转文字：返固定转写文本
+    /// 语音转文字：返固定转写文本（`translate=true` 时 task 标记为 "translate"）
     async fn transcribe(
         &self,
-        _req: crate::model::audio::TranscribeRequest,
+        req: crate::model::audio::TranscribeRequest,
     ) -> Result<TranscriptionResult> {
         Ok(TranscriptionResult {
             text: "echo transcription".into(),
@@ -409,7 +410,11 @@ impl Adapter for EchoAdapter {
             duration: Some(1.0),
             segments: None,
             words: None,
-            task: "transcribe".into(),
+            task: if req.translate {
+                "translate".into()
+            } else {
+                "transcribe".into()
+            },
             usage: None,
             model: Some("echo-asr".into()),
         })
@@ -627,6 +632,17 @@ mod tests {
         let req = TranscribeRequest::builder("echo-asr", FileInput::path("/tmp/a.mp3")).build();
         let resp = adapter.transcribe(req).await.unwrap();
         assert_eq!(resp.text, "echo transcription");
+        assert_eq!(resp.task, "transcribe");
+    }
+
+    #[tokio::test]
+    async fn translate_returns_translate_task() {
+        // translate() 默认实现置 translate=true 后委托 transcribe → task 标记为 translate
+        let adapter = EchoAdapter::new();
+        let req = TranscribeRequest::builder("echo-asr", FileInput::path("/tmp/a.mp3")).build();
+        let resp = adapter.translate(req).await.unwrap();
+        assert_eq!(resp.text, "echo transcription");
+        assert_eq!(resp.task, "translate");
     }
 
     #[tokio::test]
@@ -665,6 +681,7 @@ mod tests {
         assert!(caps.contains(&Capabilities::Embedding));
         assert!(caps.contains(&Capabilities::AudioSpeech));
         assert!(caps.contains(&Capabilities::AudioTranscribe));
+        assert!(caps.contains(&Capabilities::AudioTranslate));
         assert!(caps.contains(&Capabilities::ListVoices));
     }
 

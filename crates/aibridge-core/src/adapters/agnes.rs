@@ -217,6 +217,7 @@ impl AgnesAdapter {
     /// - `Text2Video` / `Image2Video` -> `ti2vid`
     /// - `Keyframes` -> `keyframes`
     /// - `Multiimage` -> `multi_reference`
+    /// - `Video2Video` -> `ti2vid`（Agnes 无独立 video2video 模式，按参考输入生视频归并）
     ///
     /// 注意：Python v1 `agnes.py` 直接透传 mode（同样存在该 bug），此处以
     /// Agnes 平台实际校验为准做显式映射。
@@ -226,6 +227,7 @@ impl AgnesAdapter {
             VideoMode::Text2Video | VideoMode::Image2Video => "ti2vid",
             VideoMode::Keyframes => "keyframes",
             VideoMode::Multiimage => "multi_reference",
+            VideoMode::Video2Video => "ti2vid",
         }
     }
 

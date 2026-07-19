@@ -69,6 +69,8 @@ pub enum Capabilities {
     // 音频能力
     /// 语音转文字
     AudioTranscribe,
+    /// 语音翻译（翻译为英文）
+    AudioTranslate,
     /// 文字转语音
     AudioSpeech,
     /// 音色查询
@@ -93,6 +95,7 @@ impl Capabilities {
             Self::VideoImage2Video => "image2video",
             Self::Embedding => "embedding",
             Self::AudioTranscribe => "audio_transcribe",
+            Self::AudioTranslate => "audio_translate",
             Self::AudioSpeech => "audio_speech",
             Self::ListVoices => "list_voices",
         }
@@ -189,6 +192,24 @@ pub trait Adapter: Send + Sync {
         ))
     }
 
+    /// 语音翻译（翻译为英文）
+    ///
+    /// 默认实现：复制请求并置 `translate = true` 后委托 `transcribe()`，
+    /// 由各适配器的 `transcribe` 决定支持与否：
+    /// - 支持翻译的（如 AssemblyAI）：按 `translate` 标记走翻译任务（task = "translate"）
+    /// - 不支持翻译的（如 Deepgram）：对 `translate=true` 返 Validation 错误
+    /// - 未实现 `transcribe` 的：返 `UnsupportedCapability`
+    ///
+    /// 对应 Python v1 `BaseAdapter.translate`（v1 默认抛 UnsupportedCapabilityError；
+    /// v2 改为委托 transcribe，复用各适配器已有的 translate 标记处理逻辑）。
+    async fn translate(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
+        let req = TranscribeRequest {
+            translate: true,
+            ..req
+        };
+        self.transcribe(req).await
+    }
+
     /// 文字转语音
     async fn speech(&self, req: SpeechRequest) -> Result<SpeechResult> {
         let _ = req;
@@ -243,6 +264,7 @@ pub trait Adapter: Send + Sync {
             ModelType::Video => self.supports_capability(Capabilities::VideoGenerate),
             ModelType::Audio => {
                 self.supports_capability(Capabilities::AudioTranscribe)
+                    || self.supports_capability(Capabilities::AudioTranslate)
                     || self.supports_capability(Capabilities::AudioSpeech)
             }
         }
@@ -265,6 +287,7 @@ pub type AdapterConstructor = fn(ProviderConfig) -> Result<Box<dyn Adapter>>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::image::FileInput;
     use std::collections::HashMap;
 
     /// 测试用的空适配器（仅实现必需方法，其余走默认实现）
@@ -449,6 +472,7 @@ mod tests {
         assert_eq!(Capabilities::VideoGenerate.as_str(), "video");
         assert_eq!(Capabilities::Embedding.as_str(), "embedding");
         assert_eq!(Capabilities::AudioTranscribe.as_str(), "audio_transcribe");
+        assert_eq!(Capabilities::AudioTranslate.as_str(), "audio_translate");
         assert_eq!(Capabilities::AudioSpeech.as_str(), "audio_speech");
         assert_eq!(Capabilities::ListVoices.as_str(), "list_voices");
     }
@@ -461,5 +485,87 @@ mod tests {
             caps: CapabilitySet::new(),
         };
         assert!(adapter.requires_api_key());
+    }
+
+    // ============ translate 默认实现 ============
+
+    /// 测试 translate 默认委托行为的适配器：transcribe 回显 translate 标记
+    struct TranslateEchoAdapter {
+        caps: CapabilitySet,
+    }
+
+    #[async_trait]
+    impl Adapter for TranslateEchoAdapter {
+        fn provider_type(&self) -> &str {
+            "translate-echo"
+        }
+        fn provider_name(&self) -> &str {
+            "TranslateEcho"
+        }
+        fn capabilities(&self) -> CapabilitySet {
+            self.caps.clone()
+        }
+        async fn start(&mut self) -> Result<()> {
+            Ok(())
+        }
+        async fn close(&mut self) -> Result<()> {
+            Ok(())
+        }
+        async fn list_models(&self, _: Option<ModelType>) -> Result<Vec<ModelInfo>> {
+            Ok(vec![])
+        }
+        async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
+            // 回显 translate 标记，供测试断言默认实现已置位
+            Ok(TranscriptionResult {
+                task: if req.translate {
+                    "translate".into()
+                } else {
+                    "transcribe".into()
+                },
+                ..Default::default()
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn default_translate_sets_flag_and_delegates_to_transcribe() {
+        let adapter = TranslateEchoAdapter {
+            caps: CapabilitySet::new(),
+        };
+        // 传入 translate=false 的请求，默认实现应复制请求并置 translate=true 后委托 transcribe
+        let req = TranscribeRequest::builder("m", FileInput::bytes(vec![1])).build();
+        assert!(!req.translate);
+        let result = adapter.translate(req).await.unwrap();
+        assert_eq!(result.task, "translate");
+    }
+
+    #[tokio::test]
+    async fn default_translate_returns_unsupported_when_transcribe_missing() {
+        // 未实现 transcribe 的适配器：translate 默认实现委托 transcribe → UnsupportedCapability
+        let adapter = DummyAdapter {
+            config: dummy_config(),
+            started: true,
+            caps: CapabilitySet::new(),
+        };
+        let req = TranscribeRequest::builder("m", FileInput::bytes(vec![1])).build();
+        let result = adapter.translate(req).await;
+        assert!(matches!(
+            result,
+            Err(AibridgeError::UnsupportedCapability { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn supports_model_type_audio_includes_translate() {
+        // 仅声明 AudioTranslate 的适配器也应视为支持 Audio 模型类型
+        let mut caps = CapabilitySet::new();
+        caps.insert(Capabilities::AudioTranslate);
+        let adapter = DummyAdapter {
+            config: dummy_config(),
+            started: true,
+            caps,
+        };
+        assert!(adapter.supports_model_type(ModelType::Audio));
+        assert!(!adapter.supports_model_type(ModelType::Chat));
     }
 }

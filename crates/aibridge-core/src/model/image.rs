@@ -44,6 +44,9 @@ pub struct ImageRequest {
     /// 负面提示词
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub negative_prompt: Option<String>,
+    /// 负面提示词列表（与 negative_prompt 单个字段互补）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub negative_prompts: Vec<String>,
     /// 随机种子
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
@@ -53,6 +56,12 @@ pub struct ImageRequest {
     /// CFG Scale（提示词相关性）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cfg_scale: Option<f64>,
+    /// 采样器名称
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampler: Option<String>,
+    /// 调度器
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduler: Option<String>,
     /// 响应格式（"url" / "b64_json"）
     #[serde(
         default = "default_response_format",
@@ -65,6 +74,9 @@ pub struct ImageRequest {
     /// 参考图（图生图/IP-Adapter），FileInput 列表
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reference_images: Vec<FileInput>,
+    /// 参考图强度（0-1）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_strength: Option<f64>,
     /// 遮罩图片（局部重绘）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask: Option<FileInput>,
@@ -91,12 +103,16 @@ impl ImageRequest {
                 quality: None,
                 style: None,
                 negative_prompt: None,
+                negative_prompts: Vec::new(),
                 seed: None,
                 steps: None,
                 cfg_scale: None,
+                sampler: None,
+                scheduler: None,
                 response_format: default_response_format(),
                 output_format: None,
                 reference_images: Vec::new(),
+                reference_strength: None,
                 mask: None,
                 edit_mode: None,
                 extra: HashMap::new(),
@@ -144,6 +160,10 @@ impl ImageRequestBuilder {
         self.inner.negative_prompt = Some(n.into());
         self
     }
+    pub fn negative_prompts(mut self, n: Vec<String>) -> Self {
+        self.inner.negative_prompts = n;
+        self
+    }
     pub fn seed(mut self, s: u64) -> Self {
         self.inner.seed = Some(s);
         self
@@ -156,6 +176,14 @@ impl ImageRequestBuilder {
         self.inner.cfg_scale = Some(c);
         self
     }
+    pub fn sampler(mut self, s: impl Into<String>) -> Self {
+        self.inner.sampler = Some(s.into());
+        self
+    }
+    pub fn scheduler(mut self, s: impl Into<String>) -> Self {
+        self.inner.scheduler = Some(s.into());
+        self
+    }
     pub fn response_format(mut self, r: impl Into<String>) -> Self {
         self.inner.response_format = r.into();
         self
@@ -166,6 +194,10 @@ impl ImageRequestBuilder {
     }
     pub fn reference_images(mut self, imgs: Vec<FileInput>) -> Self {
         self.inner.reference_images = imgs;
+        self
+    }
+    pub fn reference_strength(mut self, s: f64) -> Self {
+        self.inner.reference_strength = Some(s);
         self
     }
     pub fn mask(mut self, m: FileInput) -> Self {
@@ -378,5 +410,54 @@ mod tests {
         let _ = FileInput::bytes(vec![1, 2, 3]);
         let _ = FileInput::url("https://x");
         let _ = FileInput::base64("aGk=");
+    }
+
+    #[test]
+    fn image_request_new_fields_builder() {
+        let req = ImageRequest::builder("flux", "a cat")
+            .sampler("euler_a")
+            .scheduler("karras")
+            .reference_strength(0.7)
+            .negative_prompts(vec!["blurry".to_string(), "lowres".to_string()])
+            .build();
+        assert_eq!(req.sampler.as_deref(), Some("euler_a"));
+        assert_eq!(req.scheduler.as_deref(), Some("karras"));
+        assert_eq!(req.reference_strength, Some(0.7));
+        assert_eq!(
+            req.negative_prompts,
+            vec!["blurry".to_string(), "lowres".to_string()]
+        );
+    }
+
+    #[test]
+    fn image_request_new_fields_serde() {
+        let req = ImageRequest::builder("flux", "a cat")
+            .sampler("euler_a")
+            .scheduler("karras")
+            .reference_strength(0.7)
+            .negative_prompts(vec!["blurry".to_string()])
+            .build();
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"sampler\":\"euler_a\""));
+        assert!(json.contains("\"scheduler\":\"karras\""));
+        assert!(json.contains("\"reference_strength\":0.7"));
+        assert!(json.contains("\"negative_prompts\":[\"blurry\"]"));
+        // 反序列化回读
+        let back: ImageRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.sampler.as_deref(), Some("euler_a"));
+        assert_eq!(back.scheduler.as_deref(), Some("karras"));
+        assert_eq!(back.reference_strength, Some(0.7));
+        assert_eq!(back.negative_prompts, vec!["blurry".to_string()]);
+    }
+
+    #[test]
+    fn image_request_new_fields_skip_when_empty() {
+        let req = ImageRequest::builder("flux", "a cat").build();
+        let json = serde_json::to_string(&req).unwrap();
+        // 新字段为空/None 时不出现在序列化结果中
+        assert!(!json.contains("sampler"));
+        assert!(!json.contains("scheduler"));
+        assert!(!json.contains("reference_strength"));
+        assert!(!json.contains("negative_prompts"));
     }
 }

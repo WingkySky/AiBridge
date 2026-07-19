@@ -28,7 +28,7 @@ async-stream = "0.3"
 futures = "0.3"
 
 # HTTP 客户端
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "http2", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "http2", "multipart", "rustls-tls"] }
 
 # 序列化
 serde = { version = "1", features = ["derive"] }

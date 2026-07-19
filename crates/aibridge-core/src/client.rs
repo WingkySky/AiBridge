@@ -46,10 +46,10 @@ impl Client {
         let opts = opts.merge_env(provider);
         let config = ProviderConfig::from_options(provider, opts);
 
-        // 校验：requires_api_key 时必须有 api_key
-        // 阶段 0.4 无法预知适配器的 requires_api_key（适配器未实现），
-        // 暂按"有则需 key"的保守策略：未知 provider 也要求 key。
-        // 例外：免认证 provider（如 echo mock 适配器）跳过 key 校验，便于管线验证
+        // 校验：requires_api_key 时必须有 api_key。
+        // 校验发生在适配器构造之前，无法调用适配器实例的 requires_api_key()，
+        // 故按 provider 名采用保守策略：已知免认证 provider（echo mock、edge-tts 等）
+        // 跳过 key 校验，其余（含未知 provider）一律要求 key。
         let requires_api_key = !Self::is_free_provider(provider);
         config.validate(requires_api_key)?;
 
@@ -122,6 +122,13 @@ impl Client {
     /// 语音转文字
     pub async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
         self.adapter.transcribe(req).await
+    }
+
+    /// 语音翻译（翻译为英文）
+    ///
+    /// 委托适配器的 `translate()`（默认实现置 `translate=true` 后走 `transcribe()`）。
+    pub async fn translate(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
+        self.adapter.translate(req).await
     }
 
     /// 文字转语音
@@ -227,6 +234,21 @@ mod tests {
             resp.choices[0].message.content.as_deref(),
             Some("hello [echo]")
         );
+        client.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn echo_client_translate_roundtrip() {
+        // 端到端验证：Client → EchoAdapter → translate 默认实现委托 transcribe（translate=true）
+        let mut client = Client::new("echo", ClientOptions::default()).unwrap();
+        client.start().await.unwrap();
+        let req = TranscribeRequest::builder(
+            "echo-asr",
+            crate::model::image::FileInput::path("/tmp/a.mp3"),
+        )
+        .build();
+        let resp = client.translate(req).await.unwrap();
+        assert_eq!(resp.task, "translate");
         client.close().await.unwrap();
     }
 }

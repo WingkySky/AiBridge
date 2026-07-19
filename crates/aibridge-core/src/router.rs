@@ -10,9 +10,8 @@
 //! - 健康状态跟踪 + 延迟统计
 //! - 适配器用 `Arc<dyn Adapter>` 存储，从锁中克隆后立即释放锁再调用（避免跨 await 持锁）
 //!
-//! 阶段 0.4 注意：因具体适配器未实现，`start()` 创建适配器会失败，
-//! 实际路由能力在阶段 1 适配器就绪后可用。本模块的结构与逻辑已完整，
-//! 单测用 mock adapter 验证路由选择与 fallback 行为。
+//! `start()` 会真实创建并启动各 Provider 适配器；
+//! 单测通过直接注入 mock adapter 验证路由选择与 fallback 行为。
 
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
@@ -432,6 +431,18 @@ impl Router {
         .await
     }
 
+    /// 语音翻译（翻译为英文，带 Fallback）
+    ///
+    /// 按 `AudioTranslate` 能力路由（与 Python v1 `Router.translate` 一致）。
+    pub async fn translate(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
+        let model = req.model.clone();
+        self.execute_with_fallback(&model, Capabilities::AudioTranslate, |adapter| {
+            let req = req.clone();
+            async move { adapter.translate(req).await }
+        })
+        .await
+    }
+
     /// 文字转语音
     pub async fn speech(&self, req: SpeechRequest) -> Result<SpeechResult> {
         let model = req.model.clone();
@@ -641,6 +652,7 @@ fn builtin_model_provider(model: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::adapter::CapabilitySet;
+    use crate::model::image::FileInput;
     use crate::model::ChatMessage;
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -696,6 +708,18 @@ mod tests {
                 created: 0,
                 model: req.model,
                 data: vec![],
+            })
+        }
+        async fn transcribe(&self, req: TranscribeRequest) -> Result<TranscriptionResult> {
+            // 回显 provider 与 translate 标记，供路由/委托测试断言
+            Ok(TranscriptionResult {
+                text: format!("{}-{}", self.provider, req.model),
+                task: if req.translate {
+                    "translate".into()
+                } else {
+                    "transcribe".into()
+                },
+                ..Default::default()
             })
         }
         async fn list_models(&self, _: Option<ModelType>) -> Result<Vec<ModelInfo>> {
@@ -895,5 +919,36 @@ mod tests {
     fn provider_entry_weight_floored_to_1() {
         let e = ProviderEntry::new("openai", ClientOptions::default()).with_weight(0);
         assert_eq!(e.weight, 1);
+    }
+
+    #[tokio::test]
+    async fn translate_routes_and_sets_translate_flag() {
+        let caps = {
+            let mut s = CapabilitySet::new();
+            s.insert(Capabilities::AudioTranslate);
+            s
+        };
+        let (router, _c) = router_with_adapters(
+            vec![("assemblyai".into(), caps, 0)],
+            RoutingStrategy::First,
+        );
+        // "best" 内置映射到 assemblyai；translate 默认实现应置 translate=true 后委托 transcribe
+        let req = TranscribeRequest::builder("best", FileInput::path("/tmp/a.mp3")).build();
+        let result = router.translate(req).await.unwrap();
+        assert_eq!(result.task, "translate");
+        assert!(result.text.starts_with("assemblyai-"));
+    }
+
+    #[tokio::test]
+    async fn translate_returns_model_not_found_when_no_capable() {
+        // provider 无 AudioTranslate 能力且模型无映射：能力筛选失败 → ModelNotFound
+        let (router, _c) = router_with_adapters(
+            vec![("openai".into(), CapabilitySet::new(), 0)],
+            RoutingStrategy::First,
+        );
+        let req =
+            TranscribeRequest::builder("unknown-model", FileInput::path("/tmp/a.mp3")).build();
+        let result = router.translate(req).await;
+        assert!(matches!(result, Err(AibridgeError::ModelNotFound { .. })));
     }
 }

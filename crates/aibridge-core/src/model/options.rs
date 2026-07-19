@@ -150,6 +150,19 @@ pub struct ToolCallFunction {
 pub struct ParameterMapping {
     /// 键名重命名表（值为 None 表示移除该参数）
     pub rename_map: HashMap<String, Option<String>>,
+    /// 值映射表：参数名 → {原值键 → 新值}
+    ///
+    /// 对应 Python v1 `value_map: dict[str, dict[Any, Any]]`。
+    /// Python 以原始值（True / 枚举成员等）作 dict 键；Rust 统一为字符串键：
+    /// - 字符串值取其本身（枚举式参数的常见情形，如 `"high"`）
+    /// - 其余类型取 JSON 序列化文本（`true` → `"true"`、`1` → `"1"`）
+    ///
+    /// 命中时的行为（对齐 Python v1 `ParameterMapping.apply`）：
+    /// - 新值为 JSON 对象 → 展开合并进结果，原参数不再保留
+    ///   （如 `reasoning_effort=high` → `{"thinking": {"type": "enabled", ...}}`）
+    /// - 新值为非对象 → 替换原值，键名仍按 rename_map 规则处理
+    ///   （新值为 Null 时保留键、值为 null，对齐 Python `result[target_key] = None`）
+    pub value_map: HashMap<String, HashMap<String, serde_json::Value>>,
 }
 
 impl ParameterMapping {
@@ -159,24 +172,48 @@ impl ParameterMapping {
     }
 
     /// 应用映射规则
+    ///
+    /// 对齐 Python v1 `ParameterMapping.apply` 的顺序语义：
+    /// 1. 先算目标键名（rename_map），显式移除（None）直接跳过，不再查 value_map
+    /// 2. 再查 value_map：命中且新值为对象 → 展开合并，原参数不再保留；
+    ///    命中且新值为非对象 → 替换原值写入目标键（Null 时保留键、值为 null）
+    /// 3. 均未命中 → 原值写入目标键
     pub fn apply(
         &self,
         params: &HashMap<String, serde_json::Value>,
     ) -> HashMap<String, serde_json::Value> {
         let mut result = HashMap::new();
         for (key, value) in params {
-            match self.rename_map.get(key) {
-                // 显式移除
+            // 键名重命名（None 表示移除，优先于 value_map）
+            let target_key = match self.rename_map.get(key) {
                 Some(None) => continue,
-                // 重命名
-                Some(Some(new_key)) => {
-                    result.insert(new_key.clone(), value.clone());
-                }
-                // 保持原名
-                None => {
-                    result.insert(key.clone(), value.clone());
+                Some(Some(new_key)) => new_key.clone(),
+                None => key.clone(),
+            };
+
+            // 值映射：字符串值取其本身，其余类型取 JSON 序列化文本作查找键
+            // （对齐 Python 以 True / 枚举成员等原始值作 dict 键的语义）
+            if let Some(values) = self.value_map.get(key) {
+                let lookup_key = match value {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                if let Some(mapped) = values.get(&lookup_key) {
+                    match mapped {
+                        serde_json::Value::Object(map) => {
+                            for (k, v) in map {
+                                result.insert(k.clone(), v.clone());
+                            }
+                        }
+                        other => {
+                            result.insert(target_key, other.clone());
+                        }
+                    }
+                    continue;
                 }
             }
+
+            result.insert(target_key, value.clone());
         }
         result
     }
@@ -341,7 +378,10 @@ mod tests {
         let mut rename = HashMap::new();
         rename.insert("max_tokens".into(), Some("maxOutputTokens".into()));
         rename.insert("web_search".into(), None); // 移除
-        let pm = ParameterMapping { rename_map: rename };
+        let pm = ParameterMapping {
+            rename_map: rename,
+            ..Default::default()
+        };
 
         let mut params = HashMap::new();
         params.insert("max_tokens".into(), serde_json::json!(1000));
@@ -359,6 +399,168 @@ mod tests {
             result.get("temperature").and_then(|v| v.as_f64()),
             Some(0.7)
         );
+    }
+
+    #[test]
+    fn parameter_mapping_value_map_expands_object() {
+        // 对齐 Python ANTHROPIC_MAPPING：reasoning_effort=high → 展开为 thinking 对象，原键消失
+        let mut values = HashMap::new();
+        values.insert(
+            "high".into(),
+            serde_json::json!({"thinking": {"type": "enabled", "budget_tokens": 16384}}),
+        );
+        let mut value_map = HashMap::new();
+        value_map.insert("reasoning_effort".into(), values);
+        let pm = ParameterMapping {
+            value_map,
+            ..Default::default()
+        };
+
+        let mut params = HashMap::new();
+        params.insert("reasoning_effort".into(), serde_json::json!("high"));
+        params.insert("temperature".into(), serde_json::json!(0.7));
+
+        let result = pm.apply(&params);
+        assert_eq!(
+            result.get("thinking"),
+            Some(&serde_json::json!({"type": "enabled", "budget_tokens": 16384}))
+        );
+        assert!(!result.contains_key("reasoning_effort"));
+        // 未命中映射的参数原样透传
+        assert_eq!(
+            result.get("temperature").and_then(|v| v.as_f64()),
+            Some(0.7)
+        );
+    }
+
+    #[test]
+    fn parameter_mapping_value_map_replaces_scalar_value() {
+        // 非对象映射值：替换值，键名仍按 rename_map 处理（对齐 Python value = mapped）
+        let mut rename = HashMap::new();
+        rename.insert("effort".into(), Some("reasoning_effort".into()));
+        let mut values = HashMap::new();
+        values.insert("high".into(), serde_json::json!("turbo"));
+        let mut value_map = HashMap::new();
+        value_map.insert("effort".into(), values);
+        let pm = ParameterMapping {
+            rename_map: rename,
+            value_map,
+        };
+
+        let mut params = HashMap::new();
+        params.insert("effort".into(), serde_json::json!("high"));
+
+        let result = pm.apply(&params);
+        assert_eq!(
+            result.get("reasoning_effort").and_then(|v| v.as_str()),
+            Some("turbo")
+        );
+        assert!(!result.contains_key("effort"));
+    }
+
+    #[test]
+    fn parameter_mapping_value_map_null_value_kept() {
+        // 映射值为 Null：保留键、值为 null（对齐 Python result[target_key] = None）
+        let mut values = HashMap::new();
+        values.insert("false".into(), serde_json::Value::Null);
+        let mut value_map = HashMap::new();
+        value_map.insert("reasoning".into(), values);
+        let pm = ParameterMapping {
+            value_map,
+            ..Default::default()
+        };
+
+        let mut params = HashMap::new();
+        params.insert("reasoning".into(), serde_json::json!(false));
+
+        let result = pm.apply(&params);
+        assert_eq!(result.get("reasoning"), Some(&serde_json::Value::Null));
+    }
+
+    #[test]
+    fn parameter_mapping_value_map_miss_passes_through() {
+        // 值不在映射表中（如 reasoning_effort=none）→ 原样透传
+        let mut values = HashMap::new();
+        values.insert(
+            "high".into(),
+            serde_json::json!({"thinking": {"type": "enabled"}}),
+        );
+        let mut value_map = HashMap::new();
+        value_map.insert("reasoning_effort".into(), values);
+        let pm = ParameterMapping {
+            value_map,
+            ..Default::default()
+        };
+
+        let mut params = HashMap::new();
+        params.insert("reasoning_effort".into(), serde_json::json!("none"));
+
+        let result = pm.apply(&params);
+        assert_eq!(
+            result.get("reasoning_effort").and_then(|v| v.as_str()),
+            Some("none")
+        );
+        assert!(!result.contains_key("thinking"));
+    }
+
+    #[test]
+    fn parameter_mapping_value_map_bool_and_number_keys() {
+        // 非字符串值按 JSON 序列化形式查表（true → "true"，1 → "1"），
+        // 对齐 Python 以 True/枚举成员等原始值作 dict 键的语义
+        let mut values = HashMap::new();
+        values.insert(
+            "true".into(),
+            serde_json::json!({"reasoning_effort": "medium"}),
+        );
+        values.insert("1".into(), serde_json::json!("one"));
+        let mut value_map = HashMap::new();
+        value_map.insert("reasoning".into(), values);
+        let pm = ParameterMapping {
+            value_map,
+            ..Default::default()
+        };
+
+        let mut params = HashMap::new();
+        params.insert("reasoning".into(), serde_json::json!(true));
+        let result = pm.apply(&params);
+        assert_eq!(
+            result.get("reasoning_effort").and_then(|v| v.as_str()),
+            Some("medium")
+        );
+        assert!(!result.contains_key("reasoning"));
+
+        let mut params2 = HashMap::new();
+        params2.insert("reasoning".into(), serde_json::json!(1));
+        let result2 = pm.apply(&params2);
+        assert_eq!(
+            result2.get("reasoning").and_then(|v| v.as_str()),
+            Some("one")
+        );
+    }
+
+    #[test]
+    fn parameter_mapping_rename_remove_takes_precedence_over_value_map() {
+        // rename_map 移除（None）优先于 value_map
+        // （对齐 Python：先算 target_key，为 None 直接 continue，不再查 value_map）
+        let mut rename = HashMap::new();
+        rename.insert("reasoning".into(), None);
+        let mut values = HashMap::new();
+        values.insert(
+            "true".into(),
+            serde_json::json!({"reasoning_effort": "medium"}),
+        );
+        let mut value_map = HashMap::new();
+        value_map.insert("reasoning".into(), values);
+        let pm = ParameterMapping {
+            rename_map: rename,
+            value_map,
+        };
+
+        let mut params = HashMap::new();
+        params.insert("reasoning".into(), serde_json::json!(true));
+
+        let result = pm.apply(&params);
+        assert!(result.is_empty());
     }
 
     #[test]

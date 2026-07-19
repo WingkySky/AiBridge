@@ -49,12 +49,21 @@ pub struct VideoRequest {
     /// 参考图像列表（图生视频）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reference_images: Vec<FileInput>,
+    /// 参考视频列表（视频生视频）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reference_videos: Vec<FileInput>,
     /// 首帧图片
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_frame: Option<FileInput>,
     /// 尾帧图片
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_frame: Option<FileInput>,
+    /// 关键帧列表
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keyframes: Vec<HashMap<String, serde_json::Value>>,
+    /// 视频风格
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
     /// 镜头运动
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_motion: Option<String>,
@@ -100,8 +109,11 @@ impl VideoRequest {
                 aspect_ratio: None,
                 resolution: None,
                 reference_images: Vec::new(),
+                reference_videos: Vec::new(),
                 first_frame: None,
                 last_frame: None,
+                keyframes: Vec::new(),
+                style: None,
                 camera_motion: None,
                 motion_strength: None,
                 negative_prompt: None,
@@ -159,12 +171,24 @@ impl VideoRequestBuilder {
         self.inner.reference_images = imgs;
         self
     }
+    pub fn reference_videos(mut self, vids: Vec<FileInput>) -> Self {
+        self.inner.reference_videos = vids;
+        self
+    }
     pub fn first_frame(mut self, f: FileInput) -> Self {
         self.inner.first_frame = Some(f);
         self
     }
     pub fn last_frame(mut self, f: FileInput) -> Self {
         self.inner.last_frame = Some(f);
+        self
+    }
+    pub fn keyframes(mut self, kfs: Vec<HashMap<String, serde_json::Value>>) -> Self {
+        self.inner.keyframes = kfs;
+        self
+    }
+    pub fn style(mut self, s: impl Into<String>) -> Self {
+        self.inner.style = Some(s.into());
         self
     }
     pub fn camera_motion(mut self, c: impl Into<String>) -> Self {
@@ -381,5 +405,59 @@ mod tests {
         let s: VideoStatus = serde_json::from_value(json).unwrap();
         assert_eq!(s.status, TaskStatus::Processing);
         assert_eq!(s.progress, Some(45));
+    }
+
+    #[test]
+    fn video_request_new_fields_builder() {
+        let req = VideoRequest::builder("seedance-2.0", "restyle this")
+            .mode(VideoMode::Video2Video)
+            .reference_videos(vec![FileInput::url("https://example.com/v.mp4")])
+            .keyframes(vec![HashMap::from([(
+                "frame".to_string(),
+                serde_json::json!("https://example.com/kf.png"),
+            )])])
+            .style("anime")
+            .build();
+        assert_eq!(req.mode, VideoMode::Video2Video);
+        assert_eq!(req.reference_videos.len(), 1);
+        assert_eq!(req.keyframes.len(), 1);
+        assert_eq!(req.style.as_deref(), Some("anime"));
+    }
+
+    #[test]
+    fn video_mode_video2video_serde() {
+        // 对齐 Python v1 `VideoOptions.mode` Literal 中的 "video2video" 取值
+        let json = serde_json::to_string(&VideoMode::Video2Video).unwrap();
+        assert_eq!(json, "\"video2video\"");
+        let back: VideoMode = serde_json::from_str("\"video2video\"").unwrap();
+        assert_eq!(back, VideoMode::Video2Video);
+    }
+
+    #[test]
+    fn video_request_new_fields_serde() {
+        let req = VideoRequest::builder("seedance-2.0", "restyle this")
+            .reference_videos(vec![FileInput::url("https://example.com/v.mp4")])
+            .keyframes(vec![HashMap::from([("t".to_string(), serde_json::json!(0))])])
+            .style("anime")
+            .build();
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"reference_videos\":[\"https://example.com/v.mp4\"]"));
+        assert!(json.contains("\"keyframes\":[{\"t\":0}]"));
+        assert!(json.contains("\"style\":\"anime\""));
+        // 反序列化回读
+        let back: VideoRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.reference_videos.len(), 1);
+        assert_eq!(back.keyframes.len(), 1);
+        assert_eq!(back.style.as_deref(), Some("anime"));
+    }
+
+    #[test]
+    fn video_request_new_fields_skip_when_empty() {
+        let req = VideoRequest::builder("seedance-2.0", "a cat").build();
+        let json = serde_json::to_string(&req).unwrap();
+        // 新字段为空/None 时不出现在序列化结果中
+        assert!(!json.contains("reference_videos"));
+        assert!(!json.contains("keyframes"));
+        assert!(!json.contains("style"));
     }
 }

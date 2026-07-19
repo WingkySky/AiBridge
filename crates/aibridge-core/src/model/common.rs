@@ -58,6 +58,8 @@ pub enum VideoMode {
     Text2Video,
     /// 图生视频
     Image2Video,
+    /// 视频生视频
+    Video2Video,
     /// 关键帧模式
     Keyframes,
     /// 多图模式
