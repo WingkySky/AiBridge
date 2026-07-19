@@ -24,8 +24,12 @@ use tokio::sync::{mpsc, Mutex};
 use aibridge_core::client::Client as CoreClient;
 use aibridge_core::config::ClientOptions;
 use aibridge_core::error::AibridgeError;
-use aibridge_core::model::audio::SpeechRequest;
+use aibridge_core::model::audio::{SpeechRequest, TranscribeRequest, TranscriptionResult, TranscriptionSegment, TranscriptionWord};
 use aibridge_core::model::chat::{ChatCompletion, ChatCompletionChunk, ChatRequest};
+use aibridge_core::model::common::{ModelInfo, ModelType, VoiceInfo, TaskStatus};
+use aibridge_core::model::image::{ImageData, ImageRequest, ImageResult};
+use aibridge_core::model::options::{EmbedRequest, EmbeddingItem, EmbeddingResult, EmbeddingVector};
+use aibridge_core::model::video::{VideoRequest, VideoTask, VideoStatus};
 
 // ──────────────────────────────────────────────────────────────────────────
 // 错误映射
@@ -152,6 +156,206 @@ pub struct SpeechResultJs {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// 图像生成 JS 数据模型
+// ──────────────────────────────────────────────────────────────────────────
+
+/// 图像数据（JS 返回值形态）
+#[napi(object)]
+pub struct ImageDataJs {
+    /// 图像 URL
+    pub url: Option<String>,
+    /// Base64 编码的图像
+    pub b64_json: Option<String>,
+    /// 修改后的提示词（如模型优化过）
+    pub revised_prompt: Option<String>,
+}
+
+/// 图像生成结果（JS 返回值形态）
+#[napi(object)]
+pub struct ImageResultJs {
+    /// 响应 ID
+    pub id: String,
+    /// 对象类型
+    pub object: String,
+    /// 创建时间戳
+    pub created: i64,
+    /// 使用的模型
+    pub model: String,
+    /// 生成的图像列表
+    pub data: Vec<ImageDataJs>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 视频生成 JS 数据模型
+// ──────────────────────────────────────────────────────────────────────────
+
+/// 视频任务信息（JS 返回值形态）
+#[napi(object)]
+pub struct VideoTaskJs {
+    /// 任务 ID（用于轮询状态）
+    pub task_id: String,
+    /// 使用的模型
+    pub model: String,
+    /// 任务状态（pending / processing / success / failed）
+    pub status: String,
+    /// 创建时间戳
+    pub created_at: i64,
+}
+
+/// 视频任务状态（JS 返回值形态）
+#[napi(object)]
+pub struct VideoStatusJs {
+    /// 任务 ID
+    pub task_id: String,
+    /// 任务状态
+    pub status: String,
+    /// 视频 URL（成功时）
+    pub video_url: Option<String>,
+    /// 进度 0-100
+    pub progress: Option<u32>,
+    /// 错误信息（失败时）
+    pub error: Option<String>,
+    /// 创建时间戳
+    pub created_at: Option<i64>,
+    /// 更新时间戳
+    pub updated_at: Option<i64>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 文本嵌入 JS 数据模型
+// ──────────────────────────────────────────────────────────────────────────
+
+/// 嵌入项（JS 返回值形态）
+#[napi(object)]
+pub struct EmbeddingItemJs {
+    /// 对象类型（固定 "embedding"）
+    pub object: String,
+    /// 索引
+    pub index: u32,
+    /// 嵌入向量（浮点列表）
+    pub embedding: Vec<f64>,
+}
+
+/// 嵌入使用统计
+#[napi(object)]
+pub struct EmbeddingUsageJs {
+    /// 提示词 token 数
+    pub prompt_tokens: i64,
+    /// 总 token 数
+    pub total_tokens: i64,
+}
+
+/// 嵌入结果（JS 返回值形态）
+#[napi(object)]
+pub struct EmbeddingResultJs {
+    /// 对象类型（固定 "list"）
+    pub object: String,
+    /// 嵌入向量列表
+    pub data: Vec<EmbeddingItemJs>,
+    /// 使用的模型
+    pub model: String,
+    /// 使用统计
+    pub usage: Option<EmbeddingUsageJs>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 语音转写 JS 数据模型
+// ──────────────────────────────────────────────────────────────────────────
+
+/// 转写分段信息（JS 返回值形态）
+#[napi(object)]
+pub struct TranscriptionSegmentJs {
+    /// 分段 ID
+    pub id: u32,
+    /// 开始时间（秒）
+    pub start: f64,
+    /// 结束时间（秒）
+    pub end: f64,
+    /// 分段文本
+    pub text: String,
+    /// 分段置信度（0-1）
+    pub confidence: Option<f64>,
+    /// 说话人标识（说话人分离时使用）
+    pub speaker: Option<String>,
+}
+
+/// 转写词级时间戳信息（JS 返回值形态）
+#[napi(object)]
+pub struct TranscriptionWordJs {
+    /// 词文本
+    pub word: String,
+    /// 开始时间（秒）
+    pub start: f64,
+    /// 结束时间（秒）
+    pub end: f64,
+    /// 置信度（0-1）
+    pub confidence: Option<f64>,
+}
+
+/// 转写结果（JS 返回值形态）
+#[napi(object)]
+pub struct TranscriptionResultJs {
+    /// 完整转写文本
+    pub text: String,
+    /// 检测到的语言
+    pub language: Option<String>,
+    /// 音频时长（秒）
+    pub duration: Option<f64>,
+    /// 分段信息
+    pub segments: Option<Vec<TranscriptionSegmentJs>>,
+    /// 词级时间戳
+    pub words: Option<Vec<TranscriptionWordJs>>,
+    /// 任务类型（transcribe / translate）
+    pub task: String,
+    /// 使用统计
+    pub usage: Option<serde_json::Value>,
+    /// 使用的模型 ID
+    pub model: Option<String>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// 模型/音色列表 JS 数据模型
+// ──────────────────────────────────────────────────────────────────────────
+
+/// 模型信息（JS 返回值形态）
+#[napi(object)]
+pub struct ModelInfoJs {
+    /// 模型标识符
+    pub id: String,
+    /// 模型显示名称
+    pub name: String,
+    /// 模型类型（chat / image / video / audio）
+    pub model_type: String,
+    /// 提供商名称
+    pub provider: String,
+    /// 支持的能力列表
+    pub capabilities: Vec<String>,
+    /// 最大 token 数（仅 chat 模型）
+    pub max_tokens: Option<u32>,
+    /// 是否支持流式输出
+    pub supports_streaming: bool,
+    /// 模型描述
+    pub description: Option<String>,
+    /// 模型创建时间戳
+    pub created: Option<i64>,
+}
+
+/// 语音信息（JS 返回值形态）
+#[napi(object)]
+pub struct VoiceInfoJs {
+    /// 音色短名
+    pub short_name: Option<String>,
+    /// 音色显示名
+    pub name: Option<String>,
+    /// 语言区域
+    pub locale: Option<String>,
+    /// 性别
+    pub gender: Option<String>,
+    /// 音色 ID
+    pub voice_id: Option<String>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // core → JS 数据模型转换
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -208,6 +412,152 @@ fn to_chat_chunk_js(c: ChatCompletionChunk) -> ChatCompletionChunkJs {
             completion_tokens: u.completion_tokens as i64,
             total_tokens: u.total_tokens as i64,
         }),
+    }
+}
+
+/// 将 core 的 `ImageData` 转为 JS 友好结构
+fn to_image_data_js(i: ImageData) -> ImageDataJs {
+    ImageDataJs {
+        url: i.url,
+        b64_json: i.b64_json,
+        revised_prompt: i.revised_prompt,
+    }
+}
+
+/// 将 core 的 `ImageResult` 转为 JS 友好结构
+fn to_image_result_js(r: ImageResult) -> ImageResultJs {
+    ImageResultJs {
+        id: r.id,
+        object: r.object,
+        created: r.created as i64,
+        model: r.model,
+        data: r.data.into_iter().map(to_image_data_js).collect(),
+    }
+}
+
+/// 将 core 的 `VideoTask` 转为 JS 友好结构
+fn to_video_task_js(t: VideoTask) -> VideoTaskJs {
+    VideoTaskJs {
+        task_id: t.task_id,
+        model: t.model,
+        status: task_status_to_js(t.status),
+        created_at: t.created_at as i64,
+    }
+}
+
+/// 将 core 的 `VideoStatus` 转为 JS 友好结构
+fn to_video_status_js(s: VideoStatus) -> VideoStatusJs {
+    VideoStatusJs {
+        task_id: s.task_id,
+        status: task_status_to_js(s.status),
+        video_url: s.video_url,
+        progress: s.progress,
+        error: s.error,
+        created_at: s.created_at.map(|v| v as i64),
+        updated_at: s.updated_at.map(|v| v as i64),
+    }
+}
+
+/// 将 core 的 `EmbeddingItem` 转为 JS 友好结构
+fn to_embedding_item_js(item: EmbeddingItem) -> EmbeddingItemJs {
+    let embedding = match item.embedding {
+        EmbeddingVector::Float(vec) => vec,
+        EmbeddingVector::Base64(_) => Vec::new(), // base64 不直接暴露给 JS
+    };
+    EmbeddingItemJs {
+        object: item.object,
+        index: item.index,
+        embedding,
+    }
+}
+
+/// 将 core 的 `EmbeddingResult` 转为 JS 友好结构
+fn to_embedding_result_js(r: EmbeddingResult) -> EmbeddingResultJs {
+    EmbeddingResultJs {
+        object: r.object,
+        model: r.model,
+        data: r.data.into_iter().map(to_embedding_item_js).collect(),
+        usage: r.usage.map(|u| EmbeddingUsageJs {
+            prompt_tokens: u.prompt_tokens as i64,
+            total_tokens: u.total_tokens as i64,
+        }),
+    }
+}
+
+/// 将 core 的 `TranscriptionSegment` 转为 JS 友好结构
+fn to_transcription_segment_js(s: TranscriptionSegment) -> TranscriptionSegmentJs {
+    TranscriptionSegmentJs {
+        id: s.id,
+        start: s.start,
+        end: s.end,
+        text: s.text,
+        confidence: s.confidence,
+        speaker: s.speaker,
+    }
+}
+
+/// 将 core 的 `TranscriptionWord` 转为 JS 友好结构
+fn to_transcription_word_js(w: TranscriptionWord) -> TranscriptionWordJs {
+    TranscriptionWordJs {
+        word: w.word,
+        start: w.start,
+        end: w.end,
+        confidence: w.confidence,
+    }
+}
+
+/// 将 core 的 `TranscriptionResult` 转为 JS 友好结构
+fn to_transcription_result_js(r: TranscriptionResult) -> TranscriptionResultJs {
+    TranscriptionResultJs {
+        text: r.text,
+        language: r.language,
+        duration: r.duration,
+        segments: r.segments.map(|s| s.into_iter().map(to_transcription_segment_js).collect()),
+        words: r.words.map(|w| w.into_iter().map(to_transcription_word_js).collect()),
+        task: r.task,
+        usage: r.usage,
+        model: r.model,
+    }
+}
+
+/// 将 `ModelType` 转为字符串
+fn model_type_to_js(mt: ModelType) -> String {
+    mt.as_str().to_owned()
+}
+
+/// 将 core 的 `ModelInfo` 转为 JS 友好结构
+fn to_model_info_js(m: ModelInfo) -> ModelInfoJs {
+    ModelInfoJs {
+        id: m.id,
+        name: m.name,
+        model_type: model_type_to_js(m.model_type),
+        provider: m.provider,
+        capabilities: m.capabilities,
+        max_tokens: m.max_tokens,
+        supports_streaming: m.supports_streaming,
+        description: m.description,
+        created: m.created.map(|v| v as i64),
+    }
+}
+
+/// 将 core 的 `VoiceInfo` 转为 JS 友好结构
+fn to_voice_info_js(v: VoiceInfo) -> VoiceInfoJs {
+    VoiceInfoJs {
+        short_name: v.short_name,
+        name: v.name,
+        locale: v.locale,
+        gender: v.gender,
+        voice_id: v.voice_id,
+    }
+}
+
+/// 将 core 的 `TaskStatus` 转为字符串
+fn task_status_to_js(s: TaskStatus) -> String {
+    match s {
+        TaskStatus::Pending => "pending".to_owned(),
+        TaskStatus::Processing => "processing".to_owned(),
+        TaskStatus::Success => "success".to_owned(),
+        TaskStatus::Failed => "failed".to_owned(),
     }
 }
 
@@ -377,6 +727,128 @@ impl Client {
             model: resp.model,
             audio_url: resp.audio_url,
         })
+    }
+
+    /// 图像生成
+    ///
+    /// `request` 形如 `{ model, prompt, size?, n?, quality?, style? }`。
+    /// 返回 `ImageResultJs`，包含生成的图像列表。
+    #[napi]
+    pub async fn image_generate(&self, request: Value) -> Result<ImageResultJs> {
+        let req: ImageRequest = serde_json::from_value(request)
+            .map_err(|e| Error::new(Status::InvalidArg, format!("request 解析失败: {e}")))?;
+        let guard = self.inner.lock().await;
+        let resp = guard.image_generate(req).await.map_err(map_error)?;
+        Ok(to_image_result_js(resp))
+    }
+
+    /// 视频生成（创建异步任务）
+    ///
+    /// `request` 形如 `{ model, prompt, width?, height?, duration?, aspect_ratio?, mode? }`。
+    /// 返回 `VideoTaskJs`，包含 `task_id` 用于后续轮询。
+    #[napi]
+    pub async fn video_create(&self, request: Value) -> Result<VideoTaskJs> {
+        let req: VideoRequest = serde_json::from_value(request)
+            .map_err(|e| Error::new(Status::InvalidArg, format!("request 解析失败: {e}")))?;
+        let guard = self.inner.lock().await;
+        let resp = guard.video_create(req).await.map_err(map_error)?;
+        Ok(to_video_task_js(resp))
+    }
+
+    /// 视频生成状态轮询
+    ///
+    /// `task_id` 为 `video_create` 返回的任务 ID，`model` 为使用的模型。
+    /// 返回 `VideoStatusJs`，包含进度、结果 URL 或错误信息。
+    #[napi]
+    pub async fn video_poll(&self, task_id: String, model: String) -> Result<VideoStatusJs> {
+        let guard = self.inner.lock().await;
+        let resp = guard.video_poll(&task_id, &model).await.map_err(map_error)?;
+        Ok(to_video_status_js(resp))
+    }
+
+    /// 文本嵌入
+    ///
+    /// `request` 形如 `{ model, input: "text" | ["text1", "text2"] }`。
+    /// 返回 `EmbeddingResultJs`，包含向量列表。
+    #[napi]
+    pub async fn embed(&self, request: Value) -> Result<EmbeddingResultJs> {
+        let req: EmbedRequest = serde_json::from_value(request)
+            .map_err(|e| Error::new(Status::InvalidArg, format!("request 解析失败: {e}")))?;
+        let guard = self.inner.lock().await;
+        let resp = guard.embed(req).await.map_err(map_error)?;
+        Ok(to_embedding_result_js(resp))
+    }
+
+    /// 语音转文字（ASR 转写）
+    ///
+    /// `request` 形如 `{ model, file, language?, response_format? }`。
+    /// `file` 为音频路径、URL、Base64 或二进制数据。
+    /// 返回 `TranscriptionResultJs`，包含文本、分段和时间戳。
+    #[napi]
+    pub async fn transcribe(&self, request: Value) -> Result<TranscriptionResultJs> {
+        let req: TranscribeRequest = serde_json::from_value(request)
+            .map_err(|e| Error::new(Status::InvalidArg, format!("request 解析失败: {e}")))?;
+        let guard = self.inner.lock().await;
+        let resp = guard.transcribe(req).await.map_err(map_error)?;
+        Ok(to_transcription_result_js(resp))
+    }
+
+    /// 语音翻译（将非英文音频翻译为英文）
+    ///
+    /// 参数与 `transcribe` 相同，内部设置 `translate=true`。
+    /// 返回 `TranscriptionResultJs`，文本为英文。
+    #[napi]
+    pub async fn translate(&self, request: Value) -> Result<TranscriptionResultJs> {
+        let mut req: TranscribeRequest = serde_json::from_value(request)
+            .map_err(|e| Error::new(Status::InvalidArg, format!("request 解析失败: {e}")))?;
+        req.translate = true;
+        let guard = self.inner.lock().await;
+        let resp = guard.translate(req).await.map_err(map_error)?;
+        Ok(to_transcription_result_js(resp))
+    }
+
+    /// 列出可用模型
+    ///
+    /// `filter` 可选，为 "chat" / "image" / "video" / "audio" 之一，
+    /// 用于按模型类型过滤；省略则返回全部。
+    /// 返回 `ModelInfo` 列表。
+    #[napi]
+    pub async fn list_models(&self, filter: Option<String>) -> Result<Vec<ModelInfoJs>> {
+        let guard = self.inner.lock().await;
+        let model_type = filter.map(|s| ModelType::from(s.as_str()));
+        let resp = guard.list_models(model_type).await.map_err(map_error)?;
+        Ok(resp.into_iter().map(to_model_info_js).collect())
+    }
+
+    /// 列出可用音色
+    ///
+    /// `language` 可选，为语言区域代码（如 "zh-CN"），用于过滤音色。
+    /// 返回 `VoiceInfo` 列表。
+    #[napi]
+    pub async fn list_voices(&self, language: Option<String>) -> Result<Vec<VoiceInfoJs>> {
+        let guard = self.inner.lock().await;
+        let lang = language.as_ref().map(|s| s.as_str());
+        let resp = guard.list_voices(lang).await.map_err(map_error)?;
+        Ok(resp.into_iter().map(to_voice_info_js).collect())
+    }
+
+    /// 推荐可用音色
+    ///
+    /// `language` 为语言区域代码（如 "zh-CN"），`gender` 为 "Male" / "Female"，
+    /// `limit` 为推荐数量上限。
+    /// 返回 `VoiceInfo` 列表。
+    #[napi]
+    pub async fn recommend_voices(
+        &self,
+        language: Option<String>,
+        gender: Option<String>,
+        limit: u32,
+    ) -> Result<Vec<VoiceInfoJs>> {
+        let guard = self.inner.lock().await;
+        let lang = language.as_ref().map(|s| s.as_str());
+        let gen = gender.as_ref().map(|s| s.as_str());
+        let resp = guard.recommend_voices(lang, gen, limit as usize).await.map_err(map_error)?;
+        Ok(resp.into_iter().map(to_voice_info_js).collect())
     }
 }
 

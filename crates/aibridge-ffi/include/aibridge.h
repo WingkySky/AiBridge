@@ -201,6 +201,67 @@ aibridge_status_t aibridge_client_chat_stream(aibridge_client_t *client,
 void aibridge_client_destroy(aibridge_client_t *client);
 
 /**
+ * 文本嵌入（阻塞）
+ *
+ * `request_json` 为 `EmbedRequest` 的 JSON 序列化字符串。
+ * 成功时 `*out_response_json` 写入 `EmbeddingResult` 的 JSON。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `request_json` 必须是合法 JSON C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_embed(aibridge_client_t *client,
+                                        const char *request_json,
+                                        char **out_response_json);
+
+/**
+ * 图像生成（阻塞）
+ *
+ * `request_json` 为 `ImageRequest` 的 JSON 序列化字符串。
+ * 成功时 `*out_response_json` 写入 `ImageResult` 的 JSON。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `request_json` 必须是合法 JSON C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_image_generate(aibridge_client_t *client,
+                                                 const char *request_json,
+                                                 char **out_response_json);
+
+/**
+ * 获取可用模型列表（阻塞）
+ *
+ * `filter` 为可选的模型类型过滤器（"chat" / "image" / "video" / "audio"），
+ * 可为 `nullptr` 表示不过滤。
+ * 成功时 `*out_response_json` 写入 `Vec<ModelInfo>` 的 JSON 数组。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `filter` 可为 `nullptr` 或合法 UTF-8 C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_list_models(aibridge_client_t *client,
+                                              const char *filter,
+                                              char **out_response_json);
+
+/**
+ * 获取 Provider 可用音色列表（阻塞）
+ *
+ * `language` 为可选的语言区域过滤（如 "zh-CN"），可为 `nullptr`。
+ * 成功时 `*out_response_json` 写入 `Vec<VoiceInfo>` 的 JSON 数组。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `language` 可为 `nullptr` 或合法 UTF-8 C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_list_voices(aibridge_client_t *client,
+                                              const char *language,
+                                              char **out_response_json);
+
+/**
  * 创建客户端
  *
  * `provider` 为 Provider 类型（如 "openai"、"agnes"），UTF-8 C 字符串。
@@ -215,6 +276,24 @@ void aibridge_client_destroy(aibridge_client_t *client);
  * - 返回的指针需通过 [`aibridge_client_destroy`] 释放
  */
 aibridge_client_t *aibridge_client_new(const char *provider, const char *config_json);
+
+/**
+ * 推荐可用音色（阻塞）
+ *
+ * `language` 为可选的语言区域（如 "zh-CN"），`gender` 为可选的性别（"Male"/"Female"），
+ * `limit` 为返回数量上限。
+ * 成功时 `*out_response_json` 写入 `Vec<VoiceInfo>` 的 JSON 数组。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `language` / `gender` 可为 `nullptr` 或合法 UTF-8 C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_recommend_voices(aibridge_client_t *client,
+                                                   const char *language,
+                                                   const char *gender,
+                                                   uintptr_t limit,
+                                                   char **out_response_json);
 
 /**
  * 文字转语音（阻塞，二进制载荷走 `aibridge_bytes_t`）
@@ -244,6 +323,67 @@ aibridge_status_t aibridge_client_speech(aibridge_client_t *client,
  * `client` 必须是 [`aibridge_client_new`] 返回的有效指针。
  */
 aibridge_status_t aibridge_client_start(aibridge_client_t *client);
+
+/**
+ * 语音转文字（阻塞）
+ *
+ * `request_json` 为 `TranscribeRequest` 的 JSON 序列化字符串。
+ * 成功时 `*out_response_json` 写入 `TranscriptionResult` 的 JSON。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `request_json` 必须是合法 JSON C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_transcribe(aibridge_client_t *client,
+                                             const char *request_json,
+                                             char **out_response_json);
+
+/**
+ * 语音翻译（阻塞）
+ *
+ * `request_json` 为 `TranscribeRequest` 的 JSON 序列化字符串。
+ * 成功时 `*out_response_json` 写入 `TranscriptionResult` 的 JSON。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `request_json` 必须是合法 JSON C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_translate(aibridge_client_t *client,
+                                            const char *request_json,
+                                            char **out_response_json);
+
+/**
+ * 创建视频生成任务（阻塞）
+ *
+ * `request_json` 为 `VideoRequest` 的 JSON 序列化字符串。
+ * 成功时 `*out_response_json` 写入 `VideoTask` 的 JSON。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `request_json` 必须是合法 JSON C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_video_create(aibridge_client_t *client,
+                                               const char *request_json,
+                                               char **out_response_json);
+
+/**
+ * 查询视频任务状态（阻塞）
+ *
+ * `task_id` 为视频任务 ID（C 字符串），`model` 为模型标识（C 字符串）。
+ * 成功时 `*out_response_json` 写入 `VideoStatus` 的 JSON。
+ *
+ * # Safety
+ * - `client` 必须来自 [`aibridge_client_new`]
+ * - `task_id` / `model` 必须为合法 NUL 结尾 UTF-8 C 字符串
+ * - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+ */
+aibridge_status_t aibridge_client_video_poll(aibridge_client_t *client,
+                                             const char *task_id,
+                                             const char *model,
+                                             char **out_response_json);
 
 /**
  * 读取当前线程的 last_error（JSON 字符串）

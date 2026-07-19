@@ -26,7 +26,10 @@ use crate::runtime::block_on;
 use crate::string::{alloc_cstring, cstr_to_string};
 use aibridge_core::client::Client;
 use aibridge_core::config::ClientOptions;
-use aibridge_core::model::{ChatRequest, SpeechRequest};
+use aibridge_core::model::{
+    ChatRequest, EmbedRequest, ImageRequest, SpeechRequest, TranscribeRequest, VideoRequest,
+};
+use aibridge_core::model::common::ModelType;
 use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
@@ -163,7 +166,7 @@ pub unsafe extern "C" fn aibridge_client_destroy(client: *mut aibridge_client_t)
 }
 
 // =========================================================================
-// 阻塞式调用：chat / speech
+// 阻塞式调用：chat / speech / image / video / embed / transcribe / voices
 // =========================================================================
 
 /// 文本对话（阻塞）
@@ -329,6 +332,614 @@ unsafe fn speech_impl(
                 }
             }
         }
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 图像生成（阻塞）
+///
+/// `request_json` 为 `ImageRequest` 的 JSON 序列化字符串。
+/// 成功时 `*out_response_json` 写入 `ImageResult` 的 JSON。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `request_json` 必须是合法 JSON C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_image_generate(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        image_generate_impl(client, request_json, out_response_json)
+    }))
+}
+
+/// `aibridge_client_image_generate` 的实现
+unsafe fn image_generate_impl(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+    let req: ImageRequest = match parse_request_json(request_json, "ImageRequest") {
+        Ok(r) => r,
+        Err(status) => return status,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.image_generate(req).await
+    });
+
+    match result {
+        Ok(result) => match serde_json::to_string(&result) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 ImageResult 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 创建视频生成任务（阻塞）
+///
+/// `request_json` 为 `VideoRequest` 的 JSON 序列化字符串。
+/// 成功时 `*out_response_json` 写入 `VideoTask` 的 JSON。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `request_json` 必须是合法 JSON C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_video_create(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        video_create_impl(client, request_json, out_response_json)
+    }))
+}
+
+/// `aibridge_client_video_create` 的实现
+unsafe fn video_create_impl(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+    let req: VideoRequest = match parse_request_json(request_json, "VideoRequest") {
+        Ok(r) => r,
+        Err(status) => return status,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.video_create(req).await
+    });
+
+    match result {
+        Ok(task) => match serde_json::to_string(&task) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 VideoTask 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 查询视频任务状态（阻塞）
+///
+/// `task_id` 为视频任务 ID（C 字符串），`model` 为模型标识（C 字符串）。
+/// 成功时 `*out_response_json` 写入 `VideoStatus` 的 JSON。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `task_id` / `model` 必须为合法 NUL 结尾 UTF-8 C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_video_poll(
+    client: *mut aibridge_client_t,
+    task_id: *const c_char,
+    model: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        video_poll_impl(client, task_id, model, out_response_json)
+    }))
+}
+
+/// `aibridge_client_video_poll` 的实现
+unsafe fn video_poll_impl(
+    client: *mut aibridge_client_t,
+    task_id: *const c_char,
+    model: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    let task_id_str = match cstr_to_string(task_id) {
+        Some(Ok(s)) => s,
+        _ => {
+            return error::set_ffi_error_simple("task_id 为空或非合法 UTF-8");
+        }
+    };
+    let model_str = match cstr_to_string(model) {
+        Some(Ok(s)) => s,
+        _ => {
+            return error::set_ffi_error_simple("model 为空或非合法 UTF-8");
+        }
+    };
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.video_poll(&task_id_str, &model_str).await
+    });
+
+    match result {
+        Ok(status) => match serde_json::to_string(&status) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 VideoStatus 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 文本嵌入（阻塞）
+///
+/// `request_json` 为 `EmbedRequest` 的 JSON 序列化字符串。
+/// 成功时 `*out_response_json` 写入 `EmbeddingResult` 的 JSON。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `request_json` 必须是合法 JSON C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_embed(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        embed_impl(client, request_json, out_response_json)
+    }))
+}
+
+/// `aibridge_client_embed` 的实现
+unsafe fn embed_impl(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+    let req: EmbedRequest = match parse_request_json(request_json, "EmbedRequest") {
+        Ok(r) => r,
+        Err(status) => return status,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.embed(req).await
+    });
+
+    match result {
+        Ok(result) => match serde_json::to_string(&result) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 EmbeddingResult 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 语音转文字（阻塞）
+///
+/// `request_json` 为 `TranscribeRequest` 的 JSON 序列化字符串。
+/// 成功时 `*out_response_json` 写入 `TranscriptionResult` 的 JSON。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `request_json` 必须是合法 JSON C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_transcribe(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        transcribe_impl(client, request_json, out_response_json)
+    }))
+}
+
+/// `aibridge_client_transcribe` 的实现
+unsafe fn transcribe_impl(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+    let req: TranscribeRequest = match parse_request_json(request_json, "TranscribeRequest") {
+        Ok(r) => r,
+        Err(status) => return status,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.transcribe(req).await
+    });
+
+    match result {
+        Ok(result) => match serde_json::to_string(&result) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 TranscriptionResult 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 语音翻译（阻塞）
+///
+/// `request_json` 为 `TranscribeRequest` 的 JSON 序列化字符串。
+/// 成功时 `*out_response_json` 写入 `TranscriptionResult` 的 JSON。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `request_json` 必须是合法 JSON C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_translate(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        translate_impl(client, request_json, out_response_json)
+    }))
+}
+
+/// `aibridge_client_translate` 的实现
+unsafe fn translate_impl(
+    client: *mut aibridge_client_t,
+    request_json: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+    let req: TranscribeRequest = match parse_request_json(request_json, "TranscribeRequest") {
+        Ok(r) => r,
+        Err(status) => return status,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.translate(req).await
+    });
+
+    match result {
+        Ok(result) => match serde_json::to_string(&result) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 TranscriptionResult 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 获取可用模型列表（阻塞）
+///
+/// `filter` 为可选的模型类型过滤器（"chat" / "image" / "video" / "audio"），
+/// 可为 `nullptr` 表示不过滤。
+/// 成功时 `*out_response_json` 写入 `Vec<ModelInfo>` 的 JSON 数组。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `filter` 可为 `nullptr` 或合法 UTF-8 C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_list_models(
+    client: *mut aibridge_client_t,
+    filter: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        list_models_impl(client, filter, out_response_json)
+    }))
+}
+
+/// `aibridge_client_list_models` 的实现
+unsafe fn list_models_impl(
+    client: *mut aibridge_client_t,
+    filter: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+
+    let model_type: Option<ModelType> = match cstr_to_string(filter) {
+        Some(Ok(s)) if !s.is_empty() => Some(s.as_str().into()),
+        _ => None,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.list_models(model_type).await
+    });
+
+    match result {
+        Ok(models) => match serde_json::to_string(&models) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 Vec<ModelInfo> 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 获取 Provider 可用音色列表（阻塞）
+///
+/// `language` 为可选的语言区域过滤（如 "zh-CN"），可为 `nullptr`。
+/// 成功时 `*out_response_json` 写入 `Vec<VoiceInfo>` 的 JSON 数组。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `language` 可为 `nullptr` 或合法 UTF-8 C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_list_voices(
+    client: *mut aibridge_client_t,
+    language: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        list_voices_impl(client, language, out_response_json)
+    }))
+}
+
+/// `aibridge_client_list_voices` 的实现
+unsafe fn list_voices_impl(
+    client: *mut aibridge_client_t,
+    language: *const c_char,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+
+    let language: Option<&str> = match cstr_to_string(language) {
+        Some(Ok(s)) if !s.is_empty() => Some(Box::leak(s.into_boxed_str())),
+        _ => None,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.list_voices(language).await
+    });
+
+    match result {
+        Ok(voices) => match serde_json::to_string(&voices) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 Vec<VoiceInfo> 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
+        Err(e) => error::set_last_error(&e),
+    }
+}
+
+/// 推荐可用音色（阻塞）
+///
+/// `language` 为可选的语言区域（如 "zh-CN"），`gender` 为可选的性别（"Male"/"Female"），
+/// `limit` 为返回数量上限。
+/// 成功时 `*out_response_json` 写入 `Vec<VoiceInfo>` 的 JSON 数组。
+///
+/// # Safety
+/// - `client` 必须来自 [`aibridge_client_new`]
+/// - `language` / `gender` 可为 `nullptr` 或合法 UTF-8 C 字符串
+/// - `out_response_json` 必须指向可写的 `*mut c_char` 槽位
+#[no_mangle]
+pub unsafe extern "C" fn aibridge_client_recommend_voices(
+    client: *mut aibridge_client_t,
+    language: *const c_char,
+    gender: *const c_char,
+    limit: usize,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    catch_unwind_status(AssertUnwindSafe(|| {
+        recommend_voices_impl(client, language, gender, limit, out_response_json)
+    }))
+}
+
+/// `aibridge_client_recommend_voices` 的实现
+unsafe fn recommend_voices_impl(
+    client: *mut aibridge_client_t,
+    language: *const c_char,
+    gender: *const c_char,
+    limit: usize,
+    out_response_json: *mut *mut c_char,
+) -> aibridge_status_t {
+    if client.is_null() {
+        return error::set_ffi_error_simple("client 句柄为空");
+    }
+    if out_response_json.is_null() {
+        return error::set_ffi_error_simple("out_response_json 输出指针为空");
+    }
+
+    let language: Option<&str> = match cstr_to_string(language) {
+        Some(Ok(s)) if !s.is_empty() => Some(Box::leak(s.into_boxed_str())),
+        _ => None,
+    };
+    let gender: Option<&str> = match cstr_to_string(gender) {
+        Some(Ok(s)) if !s.is_empty() => Some(Box::leak(s.into_boxed_str())),
+        _ => None,
+    };
+
+    // SAFETY: 调用方保证 client 来自 aibridge_client_new
+    let handle: &AibridgeClient = &*client;
+    let inner = handle.arc();
+    let result = block_on(async {
+        let guard = inner.lock().await;
+        guard.recommend_voices(language, gender, limit).await
+    });
+
+    match result {
+        Ok(voices) => match serde_json::to_string(&voices) {
+            Ok(json) => {
+                let ptr = alloc_cstring(json);
+                if ptr.is_null() {
+                    return error::set_ffi_error_simple("响应 JSON 分配失败");
+                }
+                *out_response_json = ptr;
+                error::clear_last_error();
+                AIBRIDGE_OK
+            }
+            Err(e) => error::set_ffi_error(
+                "序列化 Vec<VoiceInfo> 失败",
+                serde_json::json!({ "error": e.to_string() }),
+            ),
+        },
         Err(e) => error::set_last_error(&e),
     }
 }
@@ -734,5 +1345,176 @@ mod tests {
         let status = catch_unwind_status(|| panic!("boom"));
         assert_eq!(status, AIBRIDGE_ERR_FFI);
         error::clear_last_error();
+    }
+
+    // =========================================================================
+    // 新增 FFI 函数的 null-client 校验测试
+    // =========================================================================
+
+    #[test]
+    fn image_generate_with_null_client_returns_ffi_error() {
+        unsafe {
+            let req = cstr(r#"{"model":"dall-e-3","prompt":"a cat"}"#);
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_image_generate(std::ptr::null_mut(), req, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(req);
+        }
+    }
+
+    #[test]
+    fn video_create_with_null_client_returns_ffi_error() {
+        unsafe {
+            let req = cstr(r#"{"model":"seedance-2.0","prompt":"a cat walking"}"#);
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_video_create(std::ptr::null_mut(), req, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(req);
+        }
+    }
+
+    #[test]
+    fn video_poll_with_null_client_returns_ffi_error() {
+        unsafe {
+            let task_id = cstr("task-123");
+            let model = cstr("seedance-2.0");
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status =
+                aibridge_client_video_poll(std::ptr::null_mut(), task_id, model, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(task_id);
+            free_cstr(model);
+        }
+    }
+
+    #[test]
+    fn embed_with_null_client_returns_ffi_error() {
+        unsafe {
+            let req = cstr(r#"{"model":"text-embedding-3-small","input":["hello"]}"#);
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_embed(std::ptr::null_mut(), req, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(req);
+        }
+    }
+
+    #[test]
+    fn transcribe_with_null_client_returns_ffi_error() {
+        unsafe {
+            let req = cstr(r#"{"model":"whisper-1","file":"/tmp/audio.wav"}"#);
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_transcribe(std::ptr::null_mut(), req, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(req);
+        }
+    }
+
+    #[test]
+    fn translate_with_null_client_returns_ffi_error() {
+        unsafe {
+            let req = cstr(r#"{"model":"whisper-1","file":"/tmp/audio.wav"}"#);
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_translate(std::ptr::null_mut(), req, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(req);
+        }
+    }
+
+    #[test]
+    fn list_models_with_null_client_returns_ffi_error() {
+        unsafe {
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_list_models(std::ptr::null_mut(), std::ptr::null(), &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+        }
+    }
+
+    #[test]
+    fn list_models_with_filter_returns_ffi_error_for_null_client() {
+        unsafe {
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let filter = cstr("image");
+            let status = aibridge_client_list_models(std::ptr::null_mut(), filter, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(filter);
+        }
+    }
+
+    #[test]
+    fn list_voices_with_null_client_returns_ffi_error() {
+        unsafe {
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_list_voices(std::ptr::null_mut(), std::ptr::null(), &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+        }
+    }
+
+    #[test]
+    fn list_voices_with_language_returns_ffi_error_for_null_client() {
+        unsafe {
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let lang = cstr("zh-CN");
+            let status = aibridge_client_list_voices(std::ptr::null_mut(), lang, &mut out);
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(lang);
+        }
+    }
+
+    #[test]
+    fn recommend_voices_with_null_client_returns_ffi_error() {
+        unsafe {
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let status = aibridge_client_recommend_voices(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+                5,
+                &mut out,
+            );
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+        }
+    }
+
+    #[test]
+    fn recommend_voices_with_params_returns_ffi_error_for_null_client() {
+        unsafe {
+            let mut out: *mut c_char = std::ptr::null_mut();
+            let lang = cstr("zh-CN");
+            let gender = cstr("Female");
+            let status = aibridge_client_recommend_voices(
+                std::ptr::null_mut(),
+                lang,
+                gender,
+                3,
+                &mut out,
+            );
+            assert_eq!(status, AIBRIDGE_ERR_FFI);
+            assert!(out.is_null());
+            error::clear_last_error();
+            free_cstr(lang);
+            free_cstr(gender);
+        }
     }
 }
