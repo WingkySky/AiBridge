@@ -7,6 +7,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-26
+
+### 🎉 重大变更 — Rust 重写（agn-sdk v1 → aibridge v2）
+
+AIBridge v2 是用 Rust 从零重写的多模态 AI 统一接口 SDK，替代 Python v1。
+五语言绑定（Python / Node.js / Go / JVM / .NET），38+ provider，全能力覆盖。
+
+### Added
+
+**Core 层：**
+- 统一 `Client` + `Adapter` trait 架构，38 个真实 provider + echo mock
+- 完整能力：chat / chat_stream / image_generate / video_create / video_poll / embed / transcribe / translate / speech / list_models / list_voices / recommend_voices
+- Router：五种路由策略（first/round_robin/random/weighted/latency）+ Fallback + EMA 延迟统计 + 健康跟踪 + 自定义模型映射
+- Anthropic native 协议 ToolCall（含 tool_choice 映射、tool_use 响应解析）
+- 指数退避重试（RetryPolicy + retry_with），rate-limit-aware retry_after 处理
+- SSE 流式解析（OpenAI 兼容 + Anthropic 独立实现）
+- HTTP/2 + 连接池（reqwest）
+- 统一错误码（11 种 AibridgeError 变体）
+- Voice 音色候选列表自动 fallback 降级
+
+**模型字段补齐：**
+- ChatRequest：repetition_penalty / min_p / thinking_budget / stream_options / web_search / search_recency_filter / search_domain_filter
+- VideoRequest：reference_videos / keyframes / style
+- ImageRequest：sampler / scheduler / reference_strength / negative_prompts
+- EmbedRequest：dimensions / encoding_format / user
+- ParameterMapping：value_map 支持值映射与对象展开（Anthropic thinking 映射）
+
+**Provider 迁移（38 个真实 + 1 mock）：**
+- MVP：openai / agnes / volcengine_cv / gemini
+- OpenAI 兼容族：azure / siliconflow / togetherai / fireworksai / cloudflareai / grok / yi / sensenova / hunyuan / groq / deepseek / stepfun / mistral / cohere / perplexity / ideogram / luma / llama / qwen / zhipu / doubao / ernie / kimi / minimax
+- 独立协议：anthropic / stability / runway / pika / kling
+- 音频 TTS/ASR：edge-tts(免认证) / elevenlabs / cartesia / deepgram / assemblyai
+- Mock：echo（全能力回显，管线验证用）
+
+**Python 绑定（PyO3）：**
+- 全能力封装：chat / chat_stream / speech / image_generate / video_create / video_poll / embed / transcribe / translate / list_models / list_voices / recommend_voices
+- Router pyclass（完整实现，含 Fallback）
+- 异步上下文管理器（`__aenter__` / `__aexit__`）
+- 原生 asyncio 协程 + AsyncIterator 流式（不阻塞事件循环）
+
+**Node.js 绑定（napi-rs）：**
+- 全能力封装（直连 core，绕过 FFI）
+- mpsc channel 桥接流式迭代器
+
+**FFI 层（C ABI）：**
+- 21 个导出函数：client_new/start/destroy、chat/chat_stream/speech/image/video/embed/transcribe/translate/list_models/list_voices/recommend_voices、stream_next/stream_destroy、last_error/string_free/bytes_free
+- panic 安全包装（catch_unwind）
+- 线程局部错误 JSON
+
+**五语言绑定：**
+- Go：CGO wrapper + goroutine streaming
+- JVM：JNA wrapper + Iterator + Flow.Publisher (reactive streams)
+- .NET：P/Invoke + SafeHandle RAII + IAsyncEnumerable streaming
+- 所有绑定均通过 echo adapter 全能力验证
+
+**文档：**
+- 中英文 README
+- mkdocs 文档网站 + GitHub Pages 自动部署
+- Python v1 → v2 迁移指南
+- 设计文档（系统架构、API 规范、五语言绑定方案）
+
+### Changed
+
+- 架构从 Python monolith 拆分为 Rust workspace（core + ffi + python + node）
+- 请求参数从 Python `**kwargs` 改为 Request struct + Builder pattern
+- 错误体系：AGNError → AibridgeError（11 种子类，统一错误码）
+- 版本从 v1.3.3 跳至 v2.0.0
+
+### Fixed
+
+- .NET 绑定：[JsonProperty] → [JsonPropertyName]（presence_penalty / frequency_penalty）
+- .NET 绑定：元组字段名 lastError → lastErr
+- .NET 绑定：TargetFramework net8.0 → net10.0
+
+### Removed
+
+- Python v1 代码归档至 `agn/` 目录，不再维护
+
 ## [1.3.3] - 2026-06-27
 
 ### Changed
