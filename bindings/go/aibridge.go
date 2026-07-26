@@ -113,9 +113,11 @@ func (c *Client) Close() {
 	}
 }
 
+// ───────────────────────────────────────────────────────────────────────
+// 文本对话
+// ───────────────────────────────────────────────────────────────────────
+
 // Chat 文本对话（阻塞，对应 aibridge_client_chat）
-//
-// 把 req 序列化为 JSON 传入 FFI，FFI 返回 ChatCompletion 的 JSON，反序列化为 Go struct。
 func (c *Client) Chat(req *ChatRequest) (*ChatCompletion, error) {
 	if c.ptr == nil {
 		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
@@ -129,18 +131,15 @@ func (c *Client) Chat(req *ChatRequest) (*ChatCompletion, error) {
 	defer C.free(unsafe.Pointer(cReq))
 
 	var outResp *C.char
-	// aibridge_client_chat 内部 block_on(async)，复杂 struct 走 JSON 边界
 	status := C.aibridge_client_chat(c.ptr, cReq, &outResp)
 	if int32(status) != statusOK {
-		// 失败时 outResp 应为 nil，但稳妥起见仍检查释放
 		if outResp != nil {
 			C.aibridge_string_free(outResp)
 		}
 		return nil, readLastError()
 	}
-	defer C.aibridge_string_free(outResp) // Rust 分配的 char* 必须释放
+	defer C.aibridge_string_free(outResp)
 
-	// C.GoString 拷贝到 Go 堆后即可安全使用
 	respStr := C.GoString(outResp)
 	var completion ChatCompletion
 	if err := json.Unmarshal([]byte(respStr), &completion); err != nil {
@@ -149,11 +148,14 @@ func (c *Client) Chat(req *ChatRequest) (*ChatCompletion, error) {
 	return &completion, nil
 }
 
+// ───────────────────────────────────────────────────────────────────────
+// 文字转语音
+// ───────────────────────────────────────────────────────────────────────
+
 // Speech 文字转语音（阻塞，对应 aibridge_client_speech）
 //
 // 二进制音频走 aibridge_bytes_t（避免 base64 膨胀），
 // meta（SpeechResult 不含 audio_data）走 JSON。
-// 两者均为 Rust 分配，必须分别调 aibridge_bytes_free / aibridge_string_free。
 func (c *Client) Speech(req *SpeechRequest) (*SpeechResult, error) {
 	if c.ptr == nil {
 		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
@@ -171,7 +173,6 @@ func (c *Client) Speech(req *SpeechRequest) (*SpeechResult, error) {
 
 	status := C.aibridge_client_speech(c.ptr, cReq, &outAudio, &outMeta)
 	if int32(status) != statusOK {
-		// 失败时仍可能分配了 audio，稳妥释放
 		if outAudio != nil {
 			C.aibridge_bytes_free(outAudio)
 		}
@@ -181,16 +182,13 @@ func (c *Client) Speech(req *SpeechRequest) (*SpeechResult, error) {
 		return nil, readLastError()
 	}
 
-	// meta JSON 必释放
 	if outMeta != nil {
 		defer C.aibridge_string_free(outMeta)
 	}
-	// audio bytes 必释放
 	if outAudio != nil {
 		defer C.aibridge_bytes_free(outAudio)
 	}
 
-	// 解析 meta JSON
 	result := &SpeechResult{}
 	if outMeta != nil {
 		metaStr := C.GoString(outMeta)
@@ -199,13 +197,9 @@ func (c *Client) Speech(req *SpeechRequest) (*SpeechResult, error) {
 		}
 	}
 
-	// 拷贝二进制音频数据到 Go 切片（必须在 bytes_free 之前完成拷贝）
 	if outAudio != nil {
-		// aibridge_bytes_t 布局：{ const uint8_t* ptr; uintptr_t len; }
-		// 用 unsafe 读取 ptr 和 len
 		audioBytes := (*C.aibridge_bytes_t)(unsafe.Pointer(outAudio))
 		if audioBytes.ptr != nil && audioBytes.len > 0 {
-			// C.GoBytes 会拷贝数据，拷贝完成后即可释放 Rust 侧内存
 			result.AudioData = C.GoBytes(unsafe.Pointer(audioBytes.ptr), C.int(int64(audioBytes.len)))
 		}
 	}
@@ -213,10 +207,321 @@ func (c *Client) Speech(req *SpeechRequest) (*SpeechResult, error) {
 	return result, nil
 }
 
-// readLastError 读取当前线程的 last_error 并转为 Go error
+// ───────────────────────────────────────────────────────────────────────
+// 图像生成
+// ───────────────────────────────────────────────────────────────────────
+
+// ImageGenerate 图像生成（阻塞，对应 aibridge_client_image_generate）
+func (c *Client) ImageGenerate(req *ImageRequest) (*ImageResult, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, newFfiError("ImageRequest JSON 序列化失败: " + err.Error())
+	}
+
+	cReq := C.CString(string(reqJSON))
+	defer C.free(unsafe.Pointer(cReq))
+
+	var outResp *C.char
+	status := C.aibridge_client_image_generate(c.ptr, cReq, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var result ImageResult
+	if err := json.Unmarshal([]byte(respStr), &result); err != nil {
+		return nil, newFfiError("ImageResult JSON 反序列化失败: " + err.Error())
+	}
+	return &result, nil
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// 视频生成
+// ───────────────────────────────────────────────────────────────────────
+
+// VideoCreate 创建视频生成任务（阻塞，对应 aibridge_client_video_create）
+func (c *Client) VideoCreate(req *VideoRequest) (*VideoTask, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, newFfiError("VideoRequest JSON 序列化失败: " + err.Error())
+	}
+
+	cReq := C.CString(string(reqJSON))
+	defer C.free(unsafe.Pointer(cReq))
+
+	var outResp *C.char
+	status := C.aibridge_client_video_create(c.ptr, cReq, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var task VideoTask
+	if err := json.Unmarshal([]byte(respStr), &task); err != nil {
+		return nil, newFfiError("VideoTask JSON 反序列化失败: " + err.Error())
+	}
+	return &task, nil
+}
+
+// VideoPoll 查询视频任务状态（阻塞，对应 aibridge_client_video_poll）
+func (c *Client) VideoPoll(taskID, model string) (*VideoStatus, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+
+	cTaskID := C.CString(taskID)
+	defer C.free(unsafe.Pointer(cTaskID))
+	cModel := C.CString(model)
+	defer C.free(unsafe.Pointer(cModel))
+
+	var outResp *C.char
+	status := C.aibridge_client_video_poll(c.ptr, cTaskID, cModel, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var status_ *VideoStatus
+	if err := json.Unmarshal([]byte(respStr), &status_); err != nil {
+		return nil, newFfiError("VideoStatus JSON 反序列化失败: " + err.Error())
+	}
+	return status_, nil
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// 文本嵌入
+// ───────────────────────────────────────────────────────────────────────
+
+// Embed 文本嵌入（阻塞，对应 aibridge_client_embed）
+func (c *Client) Embed(req *EmbedRequest) (*EmbeddingResult, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, newFfiError("EmbedRequest JSON 序列化失败: " + err.Error())
+	}
+
+	cReq := C.CString(string(reqJSON))
+	defer C.free(unsafe.Pointer(cReq))
+
+	var outResp *C.char
+	status := C.aibridge_client_embed(c.ptr, cReq, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var result EmbeddingResult
+	if err := json.Unmarshal([]byte(respStr), &result); err != nil {
+		return nil, newFfiError("EmbeddingResult JSON 反序列化失败: " + err.Error())
+	}
+	return &result, nil
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// 语音转文字 / 翻译
+// ───────────────────────────────────────────────────────────────────────
+
+// Transcribe 语音转文字（阻塞，对应 aibridge_client_transcribe）
+func (c *Client) Transcribe(req *TranscribeRequest) (*TranscriptionResult, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, newFfiError("TranscribeRequest JSON 序列化失败: " + err.Error())
+	}
+
+	cReq := C.CString(string(reqJSON))
+	defer C.free(unsafe.Pointer(cReq))
+
+	var outResp *C.char
+	status := C.aibridge_client_transcribe(c.ptr, cReq, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var result TranscriptionResult
+	if err := json.Unmarshal([]byte(respStr), &result); err != nil {
+		return nil, newFfiError("TranscriptionResult JSON 反序列化失败: " + err.Error())
+	}
+	return &result, nil
+}
+
+// Translate 语音翻译（阻塞，对应 aibridge_client_translate）
 //
-// 必须在 FFI 调用失败后立即在同一 goroutine 调用（线程局部语义）。
-// 返回的指针仅在当前线程的下一次 FFI 调用前有效，故此函数立即拷贝。
+// 内部复用 TranscribeRequest，将 translate 标志设为 true。
+func (c *Client) Translate(req *TranscribeRequest) (*TranscriptionResult, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, newFfiError("TranscribeRequest JSON 序列化失败: " + err.Error())
+	}
+
+	cReq := C.CString(string(reqJSON))
+	defer C.free(unsafe.Pointer(cReq))
+
+	var outResp *C.char
+	status := C.aibridge_client_translate(c.ptr, cReq, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var result TranscriptionResult
+	if err := json.Unmarshal([]byte(respStr), &result); err != nil {
+		return nil, newFfiError("TranscriptionResult JSON 反序列化失败: " + err.Error())
+	}
+	return &result, nil
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// 模型列表 / 音色列表
+// ───────────────────────────────────────────────────────────────────────
+
+// ListModels 获取可用模型列表（阻塞，对应 aibridge_client_list_models）
+//
+// filter 为可选的模型类型过滤器（"chat"/"image"/"video"/"audio"），
+// 传 nil 表示不过滤。
+func (c *Client) ListModels(filter *ModelType) ([]ModelInfo, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+
+	var cFilter *C.char
+	if filter != nil {
+		s := string(*filter)
+		cFilter = C.CString(s)
+		defer C.free(unsafe.Pointer(cFilter))
+	}
+
+	var outResp *C.char
+	status := C.aibridge_client_list_models(c.ptr, cFilter, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var models []ModelInfo
+	if err := json.Unmarshal([]byte(respStr), &models); err != nil {
+		return nil, newFfiError("Vec<ModelInfo> JSON 反序列化失败: " + err.Error())
+	}
+	return models, nil
+}
+
+// ListVoices 获取 Provider 可用音色列表（阻塞，对应 aibridge_client_list_voices）
+//
+// language 为可选的语言区域过滤（如 "zh-CN"），传 nil 表示不过滤。
+func (c *Client) ListVoices(language *string) ([]VoiceInfo, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+
+	var cLang *C.char
+	if language != nil {
+		cLang = C.CString(*language)
+		defer C.free(unsafe.Pointer(cLang))
+	}
+
+	var outResp *C.char
+	status := C.aibridge_client_list_voices(c.ptr, cLang, &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var voices []VoiceInfo
+	if err := json.Unmarshal([]byte(respStr), &voices); err != nil {
+		return nil, newFfiError("Vec<VoiceInfo> JSON 反序列化失败: " + err.Error())
+	}
+	return voices, nil
+}
+
+// RecommendVoices 推荐可用音色（阻塞，对应 aibridge_client_recommend_voices）
+//
+// language 为可选语言区域，gender 为可选性别（"Male"/"Female"），
+// limit 为返回数量上限。
+func (c *Client) RecommendVoices(language, gender *string, limit uint) ([]VoiceInfo, error) {
+	if c.ptr == nil {
+		return nil, newFfiError("client 句柄为空（已 Close 或未初始化）")
+	}
+
+	var cLang *C.char
+	if language != nil {
+		cLang = C.CString(*language)
+		defer C.free(unsafe.Pointer(cLang))
+	}
+	var cGender *C.char
+	if gender != nil {
+		cGender = C.CString(*gender)
+		defer C.free(unsafe.Pointer(cGender))
+	}
+
+	var outResp *C.char
+	status := C.aibridge_client_recommend_voices(c.ptr, cLang, cGender, C.size_t(limit), &outResp)
+	if int32(status) != statusOK {
+		if outResp != nil {
+			C.aibridge_string_free(outResp)
+		}
+		return nil, readLastError()
+	}
+	defer C.aibridge_string_free(outResp)
+
+	respStr := C.GoString(outResp)
+	var voices []VoiceInfo
+	if err := json.Unmarshal([]byte(respStr), &voices); err != nil {
+		return nil, newFfiError("Vec<VoiceInfo> JSON 反序列化失败: " + err.Error())
+	}
+	return voices, nil
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// 内部辅助
+// ───────────────────────────────────────────────────────────────────────
+
+// readLastError 读取当前线程的 last_error 并转为 Go error
 func readLastError() error {
 	errPtr := C.aibridge_last_error()
 	if errPtr == nil {
