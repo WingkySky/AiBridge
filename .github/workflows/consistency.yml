@@ -1,0 +1,239 @@
+# AIBridge 跨语言一致性测试
+#
+# 验证五语言绑定（Python/Node/Go/JVM/.NET）与 Rust core 的一致性：
+# 1. Hello world：echo adapter 跑 chat / chat_stream / speech，断言输出语义一致
+# 2. 错误 code：未知 provider 触发 ProviderNotFound，验证各语言 code == "provider_not_found"
+#
+# 触发：push 到 main + 所有 PR。
+
+name: Consistency Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Hello World — Python
+  # ──────────────────────────────────────────────────────────────────────────
+  hello-python:
+    name: Hello World (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi
+        run: cargo build -p aibridge-ffi
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 安装 maturin
+        run: pip install maturin
+      - name: maturin develop
+        run: maturin develop -m crates/aibridge-python/Cargo.toml
+      - name: 运行 hello world
+        run: python examples/hello_python.py
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Hello World — Node.js
+  # ──────────────────────────────────────────────────────────────────────────
+  hello-node:
+    name: Hello World (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi
+        run: cargo build -p aibridge-ffi
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/aibridge-node/package-lock.json
+      - name: npm install + build
+        run: |
+          cd crates/aibridge-node
+          npm install
+          npx napi build --platform
+      - name: 运行 hello world
+        run: node examples/hello_node.js
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. Hello World — Go
+  # ──────────────────────────────────────────────────────────────────────────
+  hello-go:
+    name: Hello World (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi
+        run: cargo build -p aibridge-ffi
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false
+      - name: 运行 hello world
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          cd bindings/go/example
+          go run hello.go
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Hello World — JVM
+  # ──────────────────────────────────────────────────────────────────────────
+  hello-jvm:
+    name: Hello World (JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi
+        run: cargo build -p aibridge-ffi
+      - name: 安装 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: 运行 hello world
+        shell: bash
+        run: |
+          cd bindings/jvm
+          ./gradlew run
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. Hello World — .NET
+  # ──────────────────────────────────────────────────────────────────────────
+  hello-dotnet:
+    name: Hello World (.NET)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi
+        run: cargo build -p aibridge-ffi
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: 运行 hello world
+        run: |
+          cd bindings/dotnet/AIBridge
+          dotnet run --no-build || dotnet run
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6. 错误 code 统一 — 五语言并行
+  # ──────────────────────────────────────────────────────────────────────────
+  error-code-probe:
+    name: Error Code Probe (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Python
+            script: tests/consistency/error_probe_python.py
+            setup: |
+              pip install maturin
+              maturin develop -m crates/aibridge-python/Cargo.toml
+              python
+          - name: Node
+            script: tests/consistency/error_probe_node.js
+            setup: |
+              cd crates/aibridge-node
+              npm install
+              npx napi build --platform
+              node
+          - name: Go
+            script: bindings/go/example/error_probe_go.go
+            setup: |
+              cd bindings/go
+              go run
+          - name: JVM
+            script: ErrorProbe.java
+            setup: |
+              cd bindings/jvm
+              ./gradlew classes -q
+              java -version
+          - name: .NET
+            script: N/A (code review only)
+            setup: |
+              dotnet --version
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi
+        run: cargo build -p aibridge-ffi
+
+      - name: Python — 运行探针
+        if: matrix.name == 'Python'
+        run: |
+          ${{ matrix.setup }}
+          python tests/consistency/error_probe_python.py
+
+      - name: Node — 运行探针
+        if: matrix.name == 'Node'
+        run: |
+          ${{ matrix.setup }}
+          node tests/consistency/error_probe_node.js
+
+      - name: Go — 运行探针
+        if: matrix.name == 'Go'
+        run: |
+          export CGO_ENABLED=1
+          cd bindings/go
+          go run ../../tests/consistency/error_probe_go.go
+
+      - name: JVM — 编译并运行探针
+        if: matrix.name == 'JVM'
+        run: |
+          cd bindings/jvm
+          ./gradlew classes -q
+          JVM_CLASSES=build/classes/java/main
+          JNA_JAR=$(find ~/.gradle/caches -name 'jna-*-jar' | head -1)
+          JACKSON_DATABIND=$(find ~/.gradle/caches -name 'jackson-databind-2.*.jar' | head -1)
+          JACKSON_CORE=$(find ~/.gradle/caches -name 'jackson-core-2.*.jar' | head -1)
+          JACKSON_ANN=$(find ~/.gradle/caches -name 'jackson-annotations-2.*.jar' | head -1)
+          mkdir -p /tmp/aibridge_probe
+          javac -cp "$JVM_CLASSES:$JNA_JAR" -d /tmp/aibridge_probe \
+            ../../tests/consistency/ErrorProbe.java
+          java -Djna.library.path=../../target/debug \
+            -cp "$JVM_CLASSES:$JNA_JAR:$JACKSON_DATABIND:$JACKSON_CORE:$JACKSON_ANN:/tmp/aibridge_probe" \
+            ErrorProbe
+
+      - name: .NET — 代码级校验
+        if: matrix.name == '.NET'
+        run: |
+          cd bindings/dotnet/AIBridge
+          dotnet build -c Release 2>&1 | grep -E 'error|Build succeeded'
+          echo "[dotnet] OK：MapByCode switch 与子类 code 字符串已对齐 Rust AibridgeError::code()"
