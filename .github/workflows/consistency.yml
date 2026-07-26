@@ -99,7 +99,6 @@ jobs:
         shell: bash
         env:
           CGO_ENABLED: '1'
-          DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
           LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
         run: |
           cd bindings/go/example
@@ -129,7 +128,6 @@ jobs:
       - name: 运行 hello world
         shell: bash
         env:
-          DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
           LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
         run: |
           cd bindings/jvm
@@ -154,6 +152,10 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: 运行 hello world
+        shell: bash
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
+          AIBRIDGE_LIB_PATH: ${{ github.workspace }}/target/release
         run: |
           cd bindings/dotnet/AIBridge
           dotnet run
@@ -238,7 +240,6 @@ jobs:
         shell: bash
         env:
           CGO_ENABLED: '1'
-          DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
           LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
         run: |
           cd bindings/go
@@ -272,7 +273,7 @@ jobs:
       - name: 查找依赖 jar
         id: jars
         run: |
-          JNA_JAR=$(find ~/.gradle/caches -name 'jna-*-jar' | head -1)
+          JNA_JAR=$(find ~/.gradle/caches -name 'jna-*-jar' -o -name 'jna*.jar' | grep -v sources | grep -v javadoc | head -1)
           JACKSON_DATABIND=$(find ~/.gradle/caches -name 'jackson-databind-2.*.jar' | head -1)
           JACKSON_CORE=$(find ~/.gradle/caches -name 'jackson-core-2.*.jar' | head -1)
           JACKSON_ANN=$(find ~/.gradle/caches -name 'jackson-annotations-2.*.jar' | head -1)
@@ -280,6 +281,7 @@ jobs:
           echo "JACKSON_DATABIND=$JACKSON_DATABIND" >> "$GITHUB_OUTPUT"
           echo "JACKSON_CORE=$JACKSON_CORE" >> "$GITHUB_OUTPUT"
           echo "JACKSON_ANN=$JACKSON_ANN" >> "$GITHUB_OUTPUT"
+          echo "DEBUG JNA_JAR=$JNA_JAR"
       - name: 编译并运行探针
         shell: bash
         env:
@@ -290,6 +292,8 @@ jobs:
           JACKSON_ANN: ${{ steps.jars.outputs.JACKSON_ANN }}
           LIB_PATH: ${{ github.workspace }}/target/release
         run: |
+          echo "JNA_JAR=$JNA_JAR"
+          echo "JVM_CLASSES=$JVM_CLASSES"
           mkdir -p /tmp/aibridge_probe
           javac -cp "$JVM_CLASSES:$JNA_JAR" -d /tmp/aibridge_probe \
             tests/consistency/ErrorProbe.java
