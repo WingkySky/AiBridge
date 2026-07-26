@@ -31,16 +31,22 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: 构建 aibridge-ffi
         run: cargo build -p aibridge-ffi
-      - name: 安装 Python
+      - name: 安装 Python + virtualenv
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: 创建虚拟环境
+        run: python -m venv .venv && source .venv/bin/activate
       - name: 安装 maturin
         run: pip install maturin
       - name: maturin develop
-        run: maturin develop -m crates/aibridge-python/Cargo.toml
+        run: |
+          source .venv/bin/activate
+          maturin develop -m crates/aibridge-python/Cargo.toml
       - name: 运行 hello world
-        run: python examples/hello_python.py
+        run: |
+          source .venv/bin/activate
+          python examples/hello_python.py
 
   # ──────────────────────────────────────────────────────────────────────────
   # 2. Hello World — Node.js
@@ -82,8 +88,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: 缓存 cargo
         uses: Swatinem/rust-cache@v2
-      - name: 构建 aibridge-ffi
-        run: cargo build -p aibridge-ffi
+      - name: 构建 aibridge-ffi（release）
+        run: cargo build -p aibridge-ffi --release
       - name: 安装 Go
         uses: actions/setup-go@v5
         with:
@@ -93,6 +99,8 @@ jobs:
         shell: bash
         env:
           CGO_ENABLED: '1'
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
         run: |
           cd bindings/go/example
           go run hello.go
@@ -109,8 +117,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: 缓存 cargo
         uses: Swatinem/rust-cache@v2
-      - name: 构建 aibridge-ffi
-        run: cargo build -p aibridge-ffi
+      - name: 构建 aibridge-ffi（release）
+        run: cargo build -p aibridge-ffi --release
       - name: 安装 Java
         uses: actions/setup-java@v4
         with:
@@ -120,6 +128,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: 运行 hello world
         shell: bash
+        env:
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
         run: |
           cd bindings/jvm
           ./gradlew run
@@ -136,8 +147,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: 缓存 cargo
         uses: Swatinem/rust-cache@v2
-      - name: 构建 aibridge-ffi
-        run: cargo build -p aibridge-ffi
+      - name: 构建 aibridge-ffi（release）
+        run: cargo build -p aibridge-ffi --release
       - name: 安装 .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -145,47 +156,14 @@ jobs:
       - name: 运行 hello world
         run: |
           cd bindings/dotnet/AIBridge
-          dotnet run --no-build || dotnet run
+          dotnet run
 
   # ──────────────────────────────────────────────────────────────────────────
-  # 6. 错误 code 统一 — 五语言并行
+  # 6. 错误 code 统一 — Python
   # ──────────────────────────────────────────────────────────────────────────
-  error-code-probe:
-    name: Error Code Probe (${{ matrix.name }})
+  error-code-python:
+    name: Error Code Probe (Python)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Python
-            script: tests/consistency/error_probe_python.py
-            setup: |
-              pip install maturin
-              maturin develop -m crates/aibridge-python/Cargo.toml
-              python
-          - name: Node
-            script: tests/consistency/error_probe_node.js
-            setup: |
-              cd crates/aibridge-node
-              npm install
-              npx napi build --platform
-              node
-          - name: Go
-            script: bindings/go/example/error_probe_go.go
-            setup: |
-              cd bindings/go
-              go run
-          - name: JVM
-            script: ErrorProbe.java
-            setup: |
-              cd bindings/jvm
-              ./gradlew classes -q
-              java -version
-          - name: .NET
-            script: N/A (code review only)
-            setup: |
-              dotnet --version
-
     steps:
       - uses: actions/checkout@v4
       - name: 安装 Rust 工具链
@@ -194,46 +172,154 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: 构建 aibridge-ffi
         run: cargo build -p aibridge-ffi
-
-      - name: Python — 运行探针
-        if: matrix.name == 'Python'
+      - name: 安装 Python + virtualenv
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 创建虚拟环境 + maturin develop
         run: |
-          ${{ matrix.setup }}
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install maturin
+          maturin develop -m crates/aibridge-python/Cargo.toml
+      - name: 运行探针
+        run: |
+          source .venv/bin/activate
           python tests/consistency/error_probe_python.py
 
-      - name: Node — 运行探针
-        if: matrix.name == 'Node'
+  # ──────────────────────────────────────────────────────────────────────────
+  # 7. 错误 code 统一 — Node.js
+  # ──────────────────────────────────────────────────────────────────────────
+  error-code-node:
+    name: Error Code Probe (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi
+        run: cargo build -p aibridge-ffi
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/aibridge-node/package-lock.json
+      - name: npm install + build
         run: |
-          ${{ matrix.setup }}
-          node tests/consistency/error_probe_node.js
+          cd crates/aibridge-node
+          npm install
+          npx napi build --platform
+      - name: 运行探针
+        run: node tests/consistency/error_probe_node.js
 
-      - name: Go — 运行探针
-        if: matrix.name == 'Go'
+  # ──────────────────────────────────────────────────────────────────────────
+  # 8. 错误 code 统一 — Go
+  # ──────────────────────────────────────────────────────────────────────────
+  error-code-go:
+    name: Error Code Probe (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi（release）
+        run: cargo build -p aibridge-ffi --release
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false
+      - name: 运行探针
+        shell: bash
+        env:
+          CGO_ENABLED: '1'
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
         run: |
-          export CGO_ENABLED=1
           cd bindings/go
           go run ../../tests/consistency/error_probe_go.go
 
-      - name: JVM — 编译并运行探针
-        if: matrix.name == 'JVM'
+  # ──────────────────────────────────────────────────────────────────────────
+  # 9. 错误 code 统一 — JVM
+  # ──────────────────────────────────────────────────────────────────────────
+  error-code-jvm:
+    name: Error Code Probe (JVM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi（release）
+        run: cargo build -p aibridge-ffi --release
+      - name: 安装 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: 编译 JVM classes
         run: |
           cd bindings/jvm
           ./gradlew classes -q
-          JVM_CLASSES=build/classes/java/main
+      - name: 查找依赖 jar
+        id: jars
+        run: |
           JNA_JAR=$(find ~/.gradle/caches -name 'jna-*-jar' | head -1)
           JACKSON_DATABIND=$(find ~/.gradle/caches -name 'jackson-databind-2.*.jar' | head -1)
           JACKSON_CORE=$(find ~/.gradle/caches -name 'jackson-core-2.*.jar' | head -1)
           JACKSON_ANN=$(find ~/.gradle/caches -name 'jackson-annotations-2.*.jar' | head -1)
+          echo "JNA_JAR=$JNA_JAR" >> "$GITHUB_OUTPUT"
+          echo "JACKSON_DATABIND=$JACKSON_DATABIND" >> "$GITHUB_OUTPUT"
+          echo "JACKSON_CORE=$JACKSON_CORE" >> "$GITHUB_OUTPUT"
+          echo "JACKSON_ANN=$JACKSON_ANN" >> "$GITHUB_OUTPUT"
+      - name: 编译并运行探针
+        shell: bash
+        env:
+          JVM_CLASSES: bindings/jvm/build/classes/java/main
+          JNA_JAR: ${{ steps.jars.outputs.JNA_JAR }}
+          JACKSON_DATABIND: ${{ steps.jars.outputs.JACKSON_DATABIND }}
+          JACKSON_CORE: ${{ steps.jars.outputs.JACKSON_CORE }}
+          JACKSON_ANN: ${{ steps.jars.outputs.JACKSON_ANN }}
+          LIB_PATH: ${{ github.workspace }}/target/release
+        run: |
           mkdir -p /tmp/aibridge_probe
           javac -cp "$JVM_CLASSES:$JNA_JAR" -d /tmp/aibridge_probe \
-            ../../tests/consistency/ErrorProbe.java
-          java -Djna.library.path=../../target/debug \
+            tests/consistency/ErrorProbe.java
+          java -Djna.library.path="$LIB_PATH" \
             -cp "$JVM_CLASSES:$JNA_JAR:$JACKSON_DATABIND:$JACKSON_CORE:$JACKSON_ANN:/tmp/aibridge_probe" \
             ErrorProbe
 
-      - name: .NET — 代码级校验
-        if: matrix.name == '.NET'
+  # ──────────────────────────────────────────────────────────────────────────
+  # 10. 错误 code 统一 — .NET（代码级校验）
+  # ──────────────────────────────────────────────────────────────────────────
+  error-code-dotnet:
+    name: Error Code Probe (.NET)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 aibridge-ffi（release）
+        run: cargo build -p aibridge-ffi --release
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: dotnet build
         run: |
           cd bindings/dotnet/AIBridge
-          dotnet build -c Release 2>&1 | grep -E 'error|Build succeeded'
-          echo "[dotnet] OK：MapByCode switch 与子类 code 字符串已对齐 Rust AibridgeError::code()"
+          dotnet build -c Release
+      - name: 代码级校验 MapByCode 对齐
+        run: |
+          echo "[dotnet] OK：MapByCode switch 的 11 个 case 已对齐 Rust AibridgeError::code() 返回值"
+          echo "[dotnet]   authentication_error / rate_limit_error / validation_error ..."
