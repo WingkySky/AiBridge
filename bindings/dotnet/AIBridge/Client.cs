@@ -126,7 +126,7 @@ public sealed class Client : IDisposable
 
                 if (result.nextStatus == AibridgeStatus.StreamEnd) yield break;
                 if (result.nextStatus < 0)
-                    throw AibridgeException.FromStatus(result.nextStatus, result.lastError);
+                    throw AibridgeException.FromStatus(result.nextStatus, result.lastErr);
 
                 ChatCompletionChunk? chunk = JsonSerializer.Deserialize<ChatCompletionChunk>(result.chunkJson, JsonOpts);
                 if (chunk == null)

@@ -33,11 +33,11 @@ public sealed class ChatRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public uint? N { get; set; }
 
-    [JsonProperty("presence_penalty")]
+    [JsonPropertyName("presence_penalty")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? PresencePenalty { get; set; }
 
-    [JsonProperty("frequency_penalty")]
+    [JsonPropertyName("frequency_penalty")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? FrequencyPenalty { get; set; }
 
