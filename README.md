@@ -84,6 +84,10 @@ Each example below uses the **`echo` adapter** (no auth, no network calls), so y
 
 ### Python
 
+```bash
+pip install aibridge
+```
+
 ```python
 import asyncio
 from aibridge import Client

@@ -84,6 +84,10 @@ AIBridge（原名 agn-sdk）是多模态 AI 统一接口 SDK：文本对话（ch
 
 ### Python
 
+```bash
+pip install aibridge
+```
+
 ```python
 import asyncio
 from aibridge import Client

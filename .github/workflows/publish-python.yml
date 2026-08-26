@@ -1,0 +1,116 @@
+# AIBridge Python SDK 发布到 PyPI
+#
+# 构建多平台 wheel（abi3，Python >= 3.10 通用）并发布到 PyPI。
+# 触发：推送 v* tag（如 v2.0.1），或手动触发（仅构建不发布）。
+#
+# 矩阵说明：
+# - abi3 wheel 与 Python 小版本无关，每个平台只需构建一次
+# - macOS：universal2（同时覆盖 x86_64 + arm64）
+# - Linux：manylinux（x86_64 + aarch64，用 cross 构建或原生 runner）
+# - Windows：x86_64
+#
+# 发布凭据：Secrets 中配置 PYPI_API_TOKEN（PyPI 项目的 API token）。
+# 信任发布（trusted publishing）需要仓库管理员在 PyPI 侧预配置，暂用 API token 方案。
+
+name: Publish Python SDK
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "仅构建不发布（true/false）"
+        default: "true"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 3
+
+jobs:
+  build-wheels:
+    name: 构建 wheel (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: universal2-apple-darwin
+            label: macOS-universal2
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            label: manylinux-x86_64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            label: manylinux-aarch64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust 缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/aibridge-python -> target"
+          key: ${{ matrix.target }}
+
+      - name: 安装 maturin
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: false
+      - run: uv tool install maturin
+
+      - name: 构建 wheel（含 sdist，仅首个 job 产出）
+        shell: bash
+        run: |
+          set -e
+          ARGS="--target ${{ matrix.target }} -o dist -m crates/aibridge-python/Cargo.toml"
+          # sdist 与平台无关，只在 manylinux-x86_64 job 构建一次，避免多 job 重复产出
+          if [[ "${{ matrix.label }}" == "manylinux-x86_64" ]]; then
+            ARGS="$ARGS --sdist"
+          fi
+          # maturin 通过环境变量识别 manylinux 目标
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            export RUSTFLAGS="-C link-arg=-Wl,-lstdc++"
+          fi
+          maturin build --release $ARGS
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.label }}
+          path: dist/
+          retention-days: 7
+
+  publish:
+    name: 发布到 PyPI
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    # 仅 tag 推送或手动 dry_run=false 时发布
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
+    environment: pypi
+    permissions:
+      # PyPI 信任发布（trusted publishing）所需的 OIDC 权限
+      id-token: write
+
+    steps:
+      - name: 下载全部 wheel
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: wheels-*
+          merge-multiple: true
+
+      - name: 发布到 PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # 空 password 时走 OIDC 信任发布；配置了 PYPI_API_TOKEN 则用 token
+          password: ${{ secrets.PYPI_API_TOKEN }}

@@ -4,15 +4,34 @@ build-backend = "maturin"
 
 [project]
 name = "aibridge"
-description = "AIBridge Python 绑定（PyO3，直连 aibridge-core，原生 asyncio）"
+description = "AIBridge - 跨语言多模态 AI 统一接口 SDK（Rust 核心，一套 API 调用 38+ provider：chat/image/video/embed/TTS/ASR）"
+# PyPI 搜索与依赖解析只认本文件；README 展示取根目录双语文档
+readme = "../../README.zh-CN.md"
 requires-python = ">=3.10"
+license = { file = "../../LICENSE" }
+authors = [{ name = "WingkySky" }]
+keywords = ["ai", "llm", "sdk", "chat", "video-generation", "multimodal", "openai", "rust"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/WingkySky/AiBridge"
+Repository = "https://github.com/WingkySky/AiBridge"
+Changelog = "https://github.com/WingkySky/AiBridge/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/WingkySky/AiBridge/tree/main/docs"
 
 [tool.maturin]
 # lib name 为 `_aibridge`（见 Cargo.toml [lib] name），故 Rust pymodule 函数名也是
