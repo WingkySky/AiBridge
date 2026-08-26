@@ -1997,7 +1997,9 @@ mod tests {
             .build();
         let body = AnthropicAdapter::build_chat_body(&req, false);
         assert_eq!(body["tool_choice"]["type"], "auto");
-        assert!(body["tool_choice"].get("disable_parallel_tool_use").is_none());
+        assert!(body["tool_choice"]
+            .get("disable_parallel_tool_use")
+            .is_none());
     }
 
     #[test]
@@ -2011,7 +2013,9 @@ mod tests {
             .build();
         let body = AnthropicAdapter::build_chat_body(&req, false);
         assert_eq!(body["tool_choice"]["type"], "none");
-        assert!(body["tool_choice"].get("disable_parallel_tool_use").is_none());
+        assert!(body["tool_choice"]
+            .get("disable_parallel_tool_use")
+            .is_none());
     }
 
     #[test]
@@ -2062,7 +2066,9 @@ mod tests {
             tool_calls: Some(vec![make_tool_call("toolu_1", "ping", "{}")]),
         }];
         let (converted, _) = AnthropicAdapter::convert_messages(&msgs);
-        let content = converted[0]["content"].as_array().expect("应为 blocks 数组");
+        let content = converted[0]["content"]
+            .as_array()
+            .expect("应为 blocks 数组");
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["type"], "tool_use");
         assert_eq!(content[0]["input"], json!({}));
@@ -2076,7 +2082,9 @@ mod tests {
             tool_calls: Some(vec![make_tool_call("toolu_1", "ping", "not-json")]),
         }];
         let (converted, _) = AnthropicAdapter::convert_messages(&msgs);
-        let content = converted[0]["content"].as_array().expect("应为 blocks 数组");
+        let content = converted[0]["content"]
+            .as_array()
+            .expect("应为 blocks 数组");
         assert_eq!(content[0]["input"], json!({}));
     }
 

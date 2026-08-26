@@ -136,7 +136,7 @@ except AibridgeError as e:
 client = Client(
     provider="agnes",
     api_key="your-key",
-    base_url="https://api.agnes.ai/v1",
+    base_url="https://apihub.agnes-ai.com/v1",
     timeout=300,
     max_retries=3,
     retry_delay=2.0,
@@ -150,7 +150,7 @@ await client.start()
 client = Client(
     provider="agnes",
     api_key="your-key",       # 关键字参数
-    base_url="https://api.agnes.ai/v1",
+    base_url="https://apihub.agnes-ai.com/v1",
 )
 await client.start()
 ```
@@ -167,7 +167,7 @@ let client = Client::new(
     "agnes",
     ClientOptions::builder()
         .api_key("your-key")
-        .base_url("https://api.agnes.ai/v1")
+        .base_url("https://apihub.agnes-ai.com/v1")
         .timeout(300)
         .max_retries(3)
         .retry_delay(2.0)
@@ -400,7 +400,12 @@ let status = client.video_poll(&task.task_id, "video-gen-1").await?;
 println!("{:?}", status.status);
 ```
 
-`video_poll` 在 v1/v2 签名一致：`(task_id, model)`。`VideoRequest` 的 `mode` 字段用 `VideoMode` 枚举（`text2video/image2video/keyframes/multiimage`），替代 v1 的字符串字面量。
+`video_poll` 在 v1/v2 签名一致：`(task_id, model)`。`VideoRequest` 的 `mode` 字段用 `VideoMode` 枚举（`text2video/image2video/video2video/keyframes/multiimage`），替代 v1 的字符串字面量。
+
+> **Agnes Video 2.5 提示**：v2 的 `VideoRequest` 是统一接口，新旧视频模型共用一套参数。
+> 对 `agnes-video-2.5` / `agnes-video-2.5-flash`（新契约），`duration`（4-12 秒）/ `resolution`（`"720P"`/`"960P"`/`"2K"`）/ `aspect_ratio` 会被适配器自动翻译为 `seconds`/`size`/`aspect_ratio` 下发；
+> 对旧模型（如 `agnes-video-v2.0`），`width`/`height`/`num_frames` 走原契约。调用方无需感知差异。
+> Python 绑定的 `video_create` 已暴露全部统一参数（含 `reference_videos` / `reference_audios` / `first_frame` / `last_frame`）。
 
 ### 7.4 文字转语音 speech（TTS）
 
@@ -674,7 +679,7 @@ import asyncio
 from agn import Client, ChatOptions, AGNError, RateLimitError
 
 async def main():
-    client = Client(provider="agnes", api_key="your-key", base_url="https://api.agnes.ai/v1")
+    client = Client(provider="agnes", api_key="your-key", base_url="https://apihub.agnes-ai.com/v1")
     async with client:
         # 对话
         opts = ChatOptions(temperature=0.7, max_tokens=1000)
@@ -709,7 +714,7 @@ import asyncio
 from aibridge import Client, AibridgeError, RateLimitError
 
 async def main():
-    client = Client(provider="agnes", api_key="your-key", base_url="https://api.agnes.ai/v1")
+    client = Client(provider="agnes", api_key="your-key", base_url="https://apihub.agnes-ai.com/v1")
     async with client:
         # 对话（去掉 Options，直接传关键字参数）
         resp = await client.chat(

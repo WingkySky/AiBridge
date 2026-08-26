@@ -52,6 +52,9 @@ pub struct VideoRequest {
     /// 参考视频列表（视频生视频）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reference_videos: Vec<FileInput>,
+    /// 参考音频列表（音频参考，如 Agnes Video 2.5 的 audios 字段）
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reference_audios: Vec<FileInput>,
     /// 首帧图片
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_frame: Option<FileInput>,
@@ -110,6 +113,7 @@ impl VideoRequest {
                 resolution: None,
                 reference_images: Vec::new(),
                 reference_videos: Vec::new(),
+                reference_audios: Vec::new(),
                 first_frame: None,
                 last_frame: None,
                 keyframes: Vec::new(),
@@ -173,6 +177,10 @@ impl VideoRequestBuilder {
     }
     pub fn reference_videos(mut self, vids: Vec<FileInput>) -> Self {
         self.inner.reference_videos = vids;
+        self
+    }
+    pub fn reference_audios(mut self, audios: Vec<FileInput>) -> Self {
+        self.inner.reference_audios = audios;
         self
     }
     pub fn first_frame(mut self, f: FileInput) -> Self {
@@ -437,7 +445,10 @@ mod tests {
     fn video_request_new_fields_serde() {
         let req = VideoRequest::builder("seedance-2.0", "restyle this")
             .reference_videos(vec![FileInput::url("https://example.com/v.mp4")])
-            .keyframes(vec![HashMap::from([("t".to_string(), serde_json::json!(0))])])
+            .keyframes(vec![HashMap::from([(
+                "t".to_string(),
+                serde_json::json!(0),
+            )])])
             .style("anime")
             .build();
         let json = serde_json::to_string(&req).unwrap();

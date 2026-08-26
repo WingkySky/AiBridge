@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**Agnes Video 2.5 / 2.5-Flash 双契约接入：**
+- 新模型接入：`agnes-video-2.5` / `agnes-video-2.5-flash`（OpenAI Videos 兼容新契约），同批注册 `agnes-video-v2.0`（旧契约）。新旧契约在 `AgnesAdapter` 内部按模型名分流，对外统一 `VideoRequest` 接口不变
+- `VideoRequest` 新增 `reference_audios` 字段（承载 2.5 音频参考能力）+ 对应 builder 方法
+- Python 绑定 `video_create` 签名补齐 7 个统一参数：`duration` / `resolution` / `aspect_ratio` / `reference_videos` / `reference_audios` / `first_frame` / `last_frame`（全部带默认值，向后兼容）
+- Python 绑定 `mode` 参数新增 `"video2video"` 取值（此前会静默回退 text2video）
+- 参数前置校验：Flash 不支持视频参考、参考图 ≤ 5 张、seconds 4-12、aspect_ratio 白名单（不符直接返回 `Validation` 错误，不发请求）
+
+### Fixed
+
+- `DEFAULT_AGNES_BASE_URL` 修正为官方统一域名 `https://apihub.agnes-ai.com/v1`（旧域名 `api.agnes.ai` 已废弃）
+- Agnes 视频轮询对 2.5 家族默认走 `/agnesapi?video_id=&model_name=` 通道，成功地址解析增加 `metadata.url` 回退
+- Agnes 视频任务 ID 解析改为 `video_id` 优先（2.5 轮询以 `video_id` 为查询键）
+
+### Tests
+
+- `aibridge-core`：agnes 适配器新增 20+ 个 2.5 单元/集成测试（双契约分流、请求体构建、参数校验、agnesapi 轮询通道、metadata.url 解析），全量 1530 个测试通过
+- Python：新增 `tests/test_video_unified_params.py`（4 个端到端用例，本地 mock 服务器实测统一参数翻译、轮询通道、Flash 校验短路、V2.0 回归）
+
 ## [2.0.0] - 2026-07-26
 
 ### 🎉 重大变更 — Rust 重写（agn-sdk v1 → aibridge v2）

@@ -65,7 +65,7 @@ A total of **38 real providers + 1 mock** (echo, for testing), grouped by catego
 
 | Category | provider |
 |---|---|
-| **MVP** | `openai` `agnes` `volcengine_cv` (Volcengine) `gemini` |
+| **MVP** | `openai` `agnes` (incl. `agnes-video-2.5` / `agnes-video-2.5-flash`, dual video contract) `volcengine_cv` (Volcengine) `gemini` |
 | **OpenAI-compatible family** | `azure` `siliconflow` (alias `sf`) `togetherai` (`together`) `fireworksai` (`fireworks`) `cloudflareai` (`cloudflare` / `workersai`) |
 | **Extended models** | `grok` (`xaigrok`) `yi` (`lingyiwanwu`) `sensenova` (`shangtang`) `hunyuan` (`tencent_hunyuan`) `groq` |
 | **More models** | `deepseek` `stepfun` (`step`) `mistral` `cohere` `perplexity` |

@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "aibridge-core"
-version = "2.0.0-alpha.1"
+version = "2.0.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "aibridge-ffi"
-version = "2.0.0-alpha.1"
+version = "2.0.0"
 dependencies = [
  "aibridge-core",
  "cbindgen",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "aibridge-node"
-version = "2.0.0-alpha.1"
+version = "2.0.0"
 dependencies = [
  "aibridge-core",
  "futures",
@@ -62,7 +62,7 @@ dependencies = [
 
 [[package]]
 name = "aibridge-python"
-version = "2.0.0-alpha.1"
+version = "2.0.0"
 dependencies = [
  "aibridge-core",
  "futures",

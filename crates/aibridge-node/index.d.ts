@@ -93,6 +93,162 @@ export interface SpeechResultJs {
   /** 音频 URL（部分 Provider 返回） */
   audioUrl?: string
 }
+/** 图像数据（JS 返回值形态） */
+export interface ImageDataJs {
+  /** 图像 URL */
+  url?: string
+  /** Base64 编码的图像 */
+  b64Json?: string
+  /** 修改后的提示词（如模型优化过） */
+  revisedPrompt?: string
+}
+/** 图像生成结果（JS 返回值形态） */
+export interface ImageResultJs {
+  /** 响应 ID */
+  id: string
+  /** 对象类型 */
+  object: string
+  /** 创建时间戳 */
+  created: number
+  /** 使用的模型 */
+  model: string
+  /** 生成的图像列表 */
+  data: Array<ImageDataJs>
+}
+/** 视频任务信息（JS 返回值形态） */
+export interface VideoTaskJs {
+  /** 任务 ID（用于轮询状态） */
+  taskId: string
+  /** 使用的模型 */
+  model: string
+  /** 任务状态（pending / processing / success / failed） */
+  status: string
+  /** 创建时间戳 */
+  createdAt: number
+}
+/** 视频任务状态（JS 返回值形态） */
+export interface VideoStatusJs {
+  /** 任务 ID */
+  taskId: string
+  /** 任务状态 */
+  status: string
+  /** 视频 URL（成功时） */
+  videoUrl?: string
+  /** 进度 0-100 */
+  progress?: number
+  /** 错误信息（失败时） */
+  error?: string
+  /** 创建时间戳 */
+  createdAt?: number
+  /** 更新时间戳 */
+  updatedAt?: number
+}
+/** 嵌入项（JS 返回值形态） */
+export interface EmbeddingItemJs {
+  /** 对象类型（固定 "embedding"） */
+  object: string
+  /** 索引 */
+  index: number
+  /** 嵌入向量（浮点列表） */
+  embedding: Array<number>
+}
+/** 嵌入使用统计 */
+export interface EmbeddingUsageJs {
+  /** 提示词 token 数 */
+  promptTokens: number
+  /** 总 token 数 */
+  totalTokens: number
+}
+/** 嵌入结果（JS 返回值形态） */
+export interface EmbeddingResultJs {
+  /** 对象类型（固定 "list"） */
+  object: string
+  /** 嵌入向量列表 */
+  data: Array<EmbeddingItemJs>
+  /** 使用的模型 */
+  model: string
+  /** 使用统计 */
+  usage?: EmbeddingUsageJs
+}
+/** 转写分段信息（JS 返回值形态） */
+export interface TranscriptionSegmentJs {
+  /** 分段 ID */
+  id: number
+  /** 开始时间（秒） */
+  start: number
+  /** 结束时间（秒） */
+  end: number
+  /** 分段文本 */
+  text: string
+  /** 分段置信度（0-1） */
+  confidence?: number
+  /** 说话人标识（说话人分离时使用） */
+  speaker?: string
+}
+/** 转写词级时间戳信息（JS 返回值形态） */
+export interface TranscriptionWordJs {
+  /** 词文本 */
+  word: string
+  /** 开始时间（秒） */
+  start: number
+  /** 结束时间（秒） */
+  end: number
+  /** 置信度（0-1） */
+  confidence?: number
+}
+/** 转写结果（JS 返回值形态） */
+export interface TranscriptionResultJs {
+  /** 完整转写文本 */
+  text: string
+  /** 检测到的语言 */
+  language?: string
+  /** 音频时长（秒） */
+  duration?: number
+  /** 分段信息 */
+  segments?: Array<TranscriptionSegmentJs>
+  /** 词级时间戳 */
+  words?: Array<TranscriptionWordJs>
+  /** 任务类型（transcribe / translate） */
+  task: string
+  /** 使用统计 */
+  usage?: any
+  /** 使用的模型 ID */
+  model?: string
+}
+/** 模型信息（JS 返回值形态） */
+export interface ModelInfoJs {
+  /** 模型标识符 */
+  id: string
+  /** 模型显示名称 */
+  name: string
+  /** 模型类型（chat / image / video / audio） */
+  modelType: string
+  /** 提供商名称 */
+  provider: string
+  /** 支持的能力列表 */
+  capabilities: Array<string>
+  /** 最大 token 数（仅 chat 模型） */
+  maxTokens?: number
+  /** 是否支持流式输出 */
+  supportsStreaming: boolean
+  /** 模型描述 */
+  description?: string
+  /** 模型创建时间戳 */
+  created?: number
+}
+/** 语音信息（JS 返回值形态） */
+export interface VoiceInfoJs {
+  /** 音色短名 */
+  shortName?: string
+  /** 音色显示名 */
+  name?: string
+  /** 语言区域 */
+  locale?: string
+  /** 性别 */
+  gender?: string
+  /** 音色 ID */
+  voiceId?: string
+}
 /**
  * AIBridge 统一客户端
  *
@@ -140,6 +296,72 @@ export declare class Client {
    * 返回 `SpeechResultJs`，`audio_data` 为 JS `Buffer`。
    */
   speech(request: any): Promise<SpeechResultJs>
+  /**
+   * 图像生成
+   *
+   * `request` 形如 `{ model, prompt, size?, n?, quality?, style? }`。
+   * 返回 `ImageResultJs`，包含生成的图像列表。
+   */
+  imageGenerate(request: any): Promise<ImageResultJs>
+  /**
+   * 视频生成（创建异步任务）
+   *
+   * `request` 形如 `{ model, prompt, width?, height?, duration?, aspect_ratio?, mode? }`。
+   * 返回 `VideoTaskJs`，包含 `task_id` 用于后续轮询。
+   */
+  videoCreate(request: any): Promise<VideoTaskJs>
+  /**
+   * 视频生成状态轮询
+   *
+   * `task_id` 为 `video_create` 返回的任务 ID，`model` 为使用的模型。
+   * 返回 `VideoStatusJs`，包含进度、结果 URL 或错误信息。
+   */
+  videoPoll(taskId: string, model: string): Promise<VideoStatusJs>
+  /**
+   * 文本嵌入
+   *
+   * `request` 形如 `{ model, input: "text" | ["text1", "text2"] }`。
+   * 返回 `EmbeddingResultJs`，包含向量列表。
+   */
+  embed(request: any): Promise<EmbeddingResultJs>
+  /**
+   * 语音转文字（ASR 转写）
+   *
+   * `request` 形如 `{ model, file, language?, response_format? }`。
+   * `file` 为音频路径、URL、Base64 或二进制数据。
+   * 返回 `TranscriptionResultJs`，包含文本、分段和时间戳。
+   */
+  transcribe(request: any): Promise<TranscriptionResultJs>
+  /**
+   * 语音翻译（将非英文音频翻译为英文）
+   *
+   * 参数与 `transcribe` 相同，内部设置 `translate=true`。
+   * 返回 `TranscriptionResultJs`，文本为英文。
+   */
+  translate(request: any): Promise<TranscriptionResultJs>
+  /**
+   * 列出可用模型
+   *
+   * `filter` 可选，为 "chat" / "image" / "video" / "audio" 之一，
+   * 用于按模型类型过滤；省略则返回全部。
+   * 返回 `ModelInfo` 列表。
+   */
+  listModels(filter?: string | undefined | null): Promise<Array<ModelInfoJs>>
+  /**
+   * 列出可用音色
+   *
+   * `language` 可选，为语言区域代码（如 "zh-CN"），用于过滤音色。
+   * 返回 `VoiceInfo` 列表。
+   */
+  listVoices(language?: string | undefined | null): Promise<Array<VoiceInfoJs>>
+  /**
+   * 推荐可用音色
+   *
+   * `language` 为语言区域代码（如 "zh-CN"），`gender` 为 "Male" / "Female"，
+   * `limit` 为推荐数量上限。
+   * 返回 `VoiceInfo` 列表。
+   */
+  recommendVoices(language: string | undefined | null, gender: string | undefined | null, limit: number): Promise<Array<VoiceInfoJs>>
 }
 /**
  * 流式对话迭代器

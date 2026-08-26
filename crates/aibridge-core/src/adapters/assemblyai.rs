@@ -1441,7 +1441,9 @@ mod tests {
         server
             .mock("GET", "/transcript/t-tr2")
             .with_status(200)
-            .with_body(r#"{"status":"completed","text":"translated via entry","language_code":"en"}"#)
+            .with_body(
+                r#"{"status":"completed","text":"translated via entry","language_code":"en"}"#,
+            )
             .create_async()
             .await;
 

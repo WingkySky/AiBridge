@@ -23,12 +23,12 @@ use crate::adapter::{Capabilities, CapabilitySet, ChatStream};
 use crate::config::ProviderConfig;
 use crate::error::{AibridgeError, Result};
 use crate::http::HttpClient;
+use crate::model::audio::{
+    TranscribeRequest, TranscriptionResult, TranscriptionSegment, TranscriptionWord,
+};
 use crate::model::chat::{
     ChatChoice, ChatCompletion, ChatCompletionChunk, ChatCompletionDelta, ChatRequest,
     ChoiceMessage, DeltaMessage,
-};
-use crate::model::audio::{
-    TranscribeRequest, TranscriptionResult, TranscriptionSegment, TranscriptionWord,
 };
 use crate::model::common::{infer_model_type, ModelInfo, ModelType};
 use crate::model::image::{FileInput, ImageData, ImageRequest, ImageResult};
@@ -428,11 +428,7 @@ impl OpenAiCompatAdapter {
 
     /// 按文件名扩展名推断音频 MIME 类型
     fn mime_from_filename(filename: &str) -> String {
-        let ext = filename
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-            .to_lowercase();
+        let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
         match ext.as_str() {
             "mp3" => "audio/mpeg",
             "wav" => "audio/wav",
@@ -462,51 +458,43 @@ impl OpenAiCompatAdapter {
             .and_then(|v| v.as_str())
             .unwrap_or_default()
             .to_string();
-        let language = force_language
-            .map(|s| s.to_string())
-            .or_else(|| {
-                value
-                    .get("language")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-            });
+        let language = force_language.map(|s| s.to_string()).or_else(|| {
+            value
+                .get("language")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        });
         let duration = value.get("duration").and_then(|v| v.as_f64());
-        let segments = value
-            .get("segments")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .map(|seg| TranscriptionSegment {
-                        id: seg.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                        start: seg.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        end: seg.get("end").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        text: seg
-                            .get("text")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        confidence: None,
-                        speaker: None,
-                    })
-                    .collect::<Vec<_>>()
-            });
-        let words = value
-            .get("words")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .map(|w| TranscriptionWord {
-                        word: w
-                            .get("word")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        start: w.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        end: w.get("end").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        confidence: None,
-                    })
-                    .collect::<Vec<_>>()
-            });
+        let segments = value.get("segments").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .map(|seg| TranscriptionSegment {
+                    id: seg.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                    start: seg.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    end: seg.get("end").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    text: seg
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    confidence: None,
+                    speaker: None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let words = value.get("words").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .map(|w| TranscriptionWord {
+                    word: w
+                        .get("word")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    start: w.get("start").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    end: w.get("end").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    confidence: None,
+                })
+                .collect::<Vec<_>>()
+        });
         TranscriptionResult {
             text,
             language,
@@ -542,7 +530,8 @@ impl OpenAiCompatAdapter {
                 .get("stream_options")
                 .and_then(|v| v.as_object().cloned())
                 .unwrap_or_default();
-            opts.entry("include_usage".to_string()).or_insert(json!(true));
+            opts.entry("include_usage".to_string())
+                .or_insert(json!(true));
             body["stream_options"] = Value::Object(opts);
         } else {
             if body
@@ -2106,8 +2095,8 @@ mod tests {
             .await;
 
         let adapter = make_adapter(&server, full_caps());
-        let req = TranscribeRequest::builder("whisper-1", FileInput::bytes(b"audio".to_vec()))
-            .build();
+        let req =
+            TranscribeRequest::builder("whisper-1", FileInput::bytes(b"audio".to_vec())).build();
         let result = adapter.translate(req).await.unwrap();
         assert_eq!(result.text, "translated to english");
         // 对齐 Python v1：translate 结果语言固定为英文

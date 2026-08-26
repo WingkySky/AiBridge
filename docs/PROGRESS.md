@@ -1,7 +1,7 @@
 # AIBridge Rust 重构 · 进度与接手文档
 
 > 本文档供任何 agent 接手 AIBridge Rust 重构工作使用。自包含，不依赖 Claude memory。
-> 最后更新：2026-07-08
+> 最后更新：2026-08-27
 
 ---
 
@@ -125,9 +125,25 @@ aibridge/
 - [ ] 一致性测试纳入 CI（当前手动跑）
 - [ ] 真实 API key 冒烟测试（用户验证）
 
+### ✅ 增量迭代：Agnes Video 2.5 / 2.5-Flash 双契约接入（2026-08-27 完成）
+
+背景：Agnes 官网发布 `agnes-video-2.5` / `agnes-video-2.5-flash`，新接口契约与 V2.0 不同（mode 词表 text/keyframe/reference、seconds/size/aspect_ratio 参数、/agnesapi 轮询通道）。调研确认全站统一 Base URL 为 `https://apihub.agnes-ai.com/v1`（旧域名 api.agnes.ai 已废弃）。
+
+- [x] `DEFAULT_AGNES_BASE_URL` 修正为新域名
+- [x] `AgnesAdapter` 双契约分治：`is_video_v25` 按模型名分流，v25 走 `build_video_body_v25`（新契约），V2.0 及旧模型走 `build_video_body_v20`（原逻辑改名保留）
+- [x] `VideoRequest` 新增 `reference_audios` 字段（统一参数承载 2.5 音频参考）
+- [x] `validate_video_request` 前置校验（Flash 无视频参考、参考图 ≤5、seconds 4-12、aspect_ratio 白名单）
+- [x] `video_poll` 对 2.5 家族默认走 `/agnesapi?video_id=&model_name=`，`parse_video_status` 增加 `metadata.url` 回退，`parse_video_task` 改 `video_id` 优先
+- [x] router 注册三模型（`agnes-video-v2.0` / `2.5` / `2.5-flash`）
+- [x] Python 绑定 `video_create` 签名补齐 7 个统一参数（duration/resolution/aspect_ratio/reference_videos/reference_audios/first_frame/last_frame），`mode` 增加 `video2video`
+- [x] 测试：core 77 个 agnes 测试 + 新增 `tests/test_video_unified_params.py`（4 个 Python 端到端用例）
+- [x] 文档同步：CHANGELOG / README / README.zh-CN / migration-guide
+
+设计要点：**对外统一参数接口不变**。新旧契约翻译全部封装在 `AgnesAdapter` 内部，五语言调用方只面对 `VideoRequest` 一套参数，无需感知 Agnes 私有的 seconds/ti2vid/extra_body 概念。
+
 ## 5. 测试状态
 
-- **aibridge-core**：1448 单测全通过（含 38 provider mock HTTP 测试 + 数据模型 + 错误 + 路由）
+- **aibridge-core**：1530 单测全通过（含 38 provider mock HTTP 测试 + 数据模型 + 错误 + 路由；2026-08-27 增加 Agnes Video 2.5 双契约 20+ 测试）
 - **aibridge-ffi**：39 单测全通过
 - **五语言 hello world**（echo adapter）：Python/Node/Go/JVM 跑通，.NET 代码就绪待 dotnet
 - **跨语言一致性测试**：tests/consistency/（四语言 chat/stream/speech/错误全一致）

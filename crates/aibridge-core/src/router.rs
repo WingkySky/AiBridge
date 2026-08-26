@@ -621,8 +621,15 @@ fn builtin_model_provider(model: &str) -> Option<&'static str> {
         | "gpt-4o-transcribe"
         | "gpt-4o-mini-transcribe" => Some("openai"),
         // Agnes
-        "claude-3-opus" | "claude-3-sonnet" | "claude-3-haiku" | "dall-e-3" | "video-gen-1"
-        | "video-gen-2" => Some("agnes"),
+        "claude-3-opus"
+        | "claude-3-sonnet"
+        | "claude-3-haiku"
+        | "dall-e-3"
+        | "video-gen-1"
+        | "video-gen-2"
+        | "agnes-video-v2.0"
+        | "agnes-video-2.5"
+        | "agnes-video-2.5-flash" => Some("agnes"),
         // Anthropic（直接协议）
         "claude-3-opus-20240229"
         | "claude-3-sonnet-20240229"
@@ -906,6 +913,13 @@ mod tests {
             Some("volcengine_cv")
         );
         assert_eq!(builtin_model_provider("edge-tts"), Some("edge-tts"));
+        // Agnes 视频模型（V2.0 / 2.5 / 2.5-Flash）均路由到 agnes
+        assert_eq!(builtin_model_provider("agnes-video-v2.0"), Some("agnes"));
+        assert_eq!(builtin_model_provider("agnes-video-2.5"), Some("agnes"));
+        assert_eq!(
+            builtin_model_provider("agnes-video-2.5-flash"),
+            Some("agnes")
+        );
         assert_eq!(builtin_model_provider("unknown"), None);
     }
 
@@ -933,10 +947,8 @@ mod tests {
             s.insert(Capabilities::AudioTranslate);
             s
         };
-        let (router, _c) = router_with_adapters(
-            vec![("assemblyai".into(), caps, 0)],
-            RoutingStrategy::First,
-        );
+        let (router, _c) =
+            router_with_adapters(vec![("assemblyai".into(), caps, 0)], RoutingStrategy::First);
         // "best" 内置映射到 assemblyai；translate 默认实现应置 translate=true 后委托 transcribe
         let req = TranscribeRequest::builder("best", FileInput::path("/tmp/a.mp3")).build();
         let result = router.translate(req).await.unwrap();

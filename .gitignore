@@ -155,3 +155,6 @@ node_modules/
 # 原生库发布产物（target/ 外的）
 *.dylib
 *.dll
+
+# WorkBuddy 项目数据（本地工作记忆，不入库）
+.workbuddy/

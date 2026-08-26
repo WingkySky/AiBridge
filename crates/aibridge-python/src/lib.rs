@@ -58,8 +58,8 @@ use aibridge_core::model::options::{
 use aibridge_core::model::video::{
     VideoRequest as CoreVideoRequest, VideoStatus as CoreVideoStatus, VideoTask as CoreVideoTask,
 };
+use aibridge_core::router::RoutingStrategy as CoreRoutingStrategy;
 use aibridge_core::router::{ProviderEntry as CoreProviderEntry, Router as CoreRouter};
-use aibridge_core::router::{RoutingStrategy as CoreRoutingStrategy};
 
 // ===========================================================================
 // 全局 tokio runtime
@@ -278,6 +278,7 @@ fn py_to_embed_input(obj: &Bound<'_, PyAny>) -> PyResult<CoreEmbedInput> {
 fn parse_video_mode(s: &str) -> CoreVideoMode {
     match s.to_lowercase().as_str() {
         "image2video" => CoreVideoMode::Image2Video,
+        "video2video" => CoreVideoMode::Video2Video,
         "keyframes" => CoreVideoMode::Keyframes,
         "multiimage" => CoreVideoMode::Multiimage,
         _ => CoreVideoMode::Text2Video,
@@ -966,10 +967,7 @@ impl TranscriptionSegment {
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "TranscriptionSegment(id={}, text={:?})",
-            self.id, self.text
-        )
+        format!("TranscriptionSegment(id={}, text={:?})", self.id, self.text)
     }
 }
 
@@ -1153,10 +1151,8 @@ impl EmbeddingResult {
 
 impl EmbeddingResult {
     fn from_core(r: CoreEmbeddingResult) -> Self {
-        let (prompt_tokens, total_tokens) = r
-            .usage
-            .map(|u| (u.prompt_tokens, u.total_tokens))
-            .unzip();
+        let (prompt_tokens, total_tokens) =
+            r.usage.map(|u| (u.prompt_tokens, u.total_tokens)).unzip();
         Self {
             model: r.model,
             data: r.data.into_iter().map(EmbeddingItem::from_core).collect(),
@@ -1665,28 +1661,30 @@ impl Client {
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<ImageResult> {
         // 在持 GIL 时转换 Python 对象为 core 类型（**kwargs / reference_images / mask）
-        let (extra, ref_imgs, mask_input) = Python::attach(|py| -> PyResult<(
-            std::collections::HashMap<String, serde_json::Value>,
-            Vec<CoreFileInput>,
-            Option<CoreFileInput>,
-        )> {
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            let ref_imgs = match &reference_images {
-                Some(imgs) => imgs
-                    .iter()
-                    .map(|i| py_to_file_input(i.bind(py)))
-                    .collect::<PyResult<Vec<_>>>()?,
-                None => Vec::new(),
-            };
-            let mask_input = match &mask {
-                Some(m) => Some(py_to_file_input(m.bind(py))?),
-                None => None,
-            };
-            Ok((extra, ref_imgs, mask_input))
-        })?;
+        let (extra, ref_imgs, mask_input) = Python::attach(
+            |py| -> PyResult<(
+                std::collections::HashMap<String, serde_json::Value>,
+                Vec<CoreFileInput>,
+                Option<CoreFileInput>,
+            )> {
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                let ref_imgs = match &reference_images {
+                    Some(imgs) => imgs
+                        .iter()
+                        .map(|i| py_to_file_input(i.bind(py)))
+                        .collect::<PyResult<Vec<_>>>()?,
+                    None => Vec::new(),
+                };
+                let mask_input = match &mask {
+                    Some(m) => Some(py_to_file_input(m.bind(py))?),
+                    None => None,
+                };
+                Ok((extra, ref_imgs, mask_input))
+            },
+        )?;
 
         let mut builder = CoreImageRequest::builder(model, prompt)
             .size(size)
@@ -1723,19 +1721,26 @@ impl Client {
 
     /// 创建视频生成任务
     ///
-    /// 参数：
+    /// 参数（统一接口，新旧模型共用，Agnes 等适配器内部按模型版本翻译为
+    /// 各自契约的 seconds/size 或 width/height 等）：
     /// - `model`: 视频模型名称
     /// - `prompt`: 提示词
-    /// - `width`/`height`: 视频分辨率（默认 1280x720）
+    /// - `mode`: 生成模式（"text2video"/"image2video"/"video2video"/"keyframes"/"multiimage"，默认 "text2video"）
+    /// - `width`/`height`: 视频分辨率像素（旧契约模型，默认 1280x720）
     /// - `num_frames`: 帧数（部分模型需要）
     /// - `frame_rate`: 帧率（默认 24）
-    /// - `mode`: 生成模式（"text2video"/"image2video"/"keyframes"/"multiimage"，默认 "text2video"）
-    /// - `reference_images`: 参考图列表（图生视频）
+    /// - `duration`: 时长秒数（新契约模型，如 agnes-video-2.5 的 seconds，取值 4-12）
+    /// - `resolution`: 分辨率档位（新契约模型，如 "720P"/"960P"/"2K"）
+    /// - `aspect_ratio`: 画幅（如 "16:9"/"9:16"）
+    /// - `reference_images`: 参考图列表（图生视频/多图）
+    /// - `reference_videos`: 参考视频列表（视频生视频，如 agnes-video-2.5 的 videos）
+    /// - `reference_audios`: 参考音频列表（音频参考，如 agnes-video-2.5 的 audios）
+    /// - `first_frame`/`last_frame`: 首帧/尾帧图片（关键帧模式）
     /// - `negative_prompt`: 负面提示词
     /// - `seed`: 随机种子
     /// - `**kwargs`: 厂商特有参数透传
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (model, prompt, width=1280, height=720, num_frames=None, frame_rate=24, mode="text2video", reference_images=None, negative_prompt=None, seed=None, **kwargs))]
+    #[pyo3(signature = (model, prompt, width=1280, height=720, num_frames=None, frame_rate=24, mode="text2video", duration=None, resolution=None, aspect_ratio=None, reference_images=None, reference_videos=None, reference_audios=None, first_frame=None, last_frame=None, negative_prompt=None, seed=None, **kwargs))]
     async fn video_create(
         &self,
         model: String,
@@ -1745,28 +1750,56 @@ impl Client {
         num_frames: Option<u32>,
         frame_rate: u32,
         mode: &str,
+        duration: Option<u32>,
+        resolution: Option<String>,
+        aspect_ratio: Option<String>,
         reference_images: Option<Vec<Py<PyAny>>>,
+        reference_videos: Option<Vec<Py<PyAny>>>,
+        reference_audios: Option<Vec<Py<PyAny>>>,
+        first_frame: Option<Py<PyAny>>,
+        last_frame: Option<Py<PyAny>>,
         negative_prompt: Option<String>,
         seed: Option<u64>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<VideoTask> {
-        let (extra, ref_imgs) = Python::attach(|py| -> PyResult<(
-            std::collections::HashMap<String, serde_json::Value>,
-            Vec<CoreFileInput>,
-        )> {
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            let ref_imgs = match &reference_images {
-                Some(imgs) => imgs
-                    .iter()
-                    .map(|i| py_to_file_input(i.bind(py)))
-                    .collect::<PyResult<Vec<_>>>()?,
-                None => Vec::new(),
-            };
-            Ok((extra, ref_imgs))
-        })?;
+        // 统一解析 kwargs 透传与各文件输入参数（图片/视频/音频/首尾帧）
+        let (extra, ref_imgs, ref_vids, ref_auds, first, last) = Python::attach(
+            |py| -> PyResult<(
+                std::collections::HashMap<String, serde_json::Value>,
+                Vec<CoreFileInput>,
+                Vec<CoreFileInput>,
+                Vec<CoreFileInput>,
+                Option<CoreFileInput>,
+                Option<CoreFileInput>,
+            )> {
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                // 将可选的 Python 文件输入列表统一转为 core FileInput
+                let to_list = |v: &Option<Vec<Py<PyAny>>>| -> PyResult<Vec<CoreFileInput>> {
+                    match v {
+                        Some(items) => items
+                            .iter()
+                            .map(|i| py_to_file_input(i.bind(py)))
+                            .collect::<PyResult<Vec<_>>>(),
+                        None => Ok(Vec::new()),
+                    }
+                };
+                let ref_imgs = to_list(&reference_images)?;
+                let ref_vids = to_list(&reference_videos)?;
+                let ref_auds = to_list(&reference_audios)?;
+                let first = match &first_frame {
+                    Some(f) => Some(py_to_file_input(f.bind(py))?),
+                    None => None,
+                };
+                let last = match &last_frame {
+                    Some(f) => Some(py_to_file_input(f.bind(py))?),
+                    None => None,
+                };
+                Ok((extra, ref_imgs, ref_vids, ref_auds, first, last))
+            },
+        )?;
 
         let mut builder = CoreVideoRequest::builder(model, prompt)
             .width(width)
@@ -1776,8 +1809,30 @@ impl Client {
         if let Some(nf) = num_frames {
             builder = builder.num_frames(nf);
         }
+        // 新契约统一参数：duration / resolution / aspect_ratio（适配器内部按模型翻译）
+        if let Some(d) = duration {
+            builder = builder.duration(d);
+        }
+        if let Some(r) = resolution {
+            builder = builder.resolution(r);
+        }
+        if let Some(ar) = aspect_ratio {
+            builder = builder.aspect_ratio(ar);
+        }
         if !ref_imgs.is_empty() {
             builder = builder.reference_images(ref_imgs);
+        }
+        if !ref_vids.is_empty() {
+            builder = builder.reference_videos(ref_vids);
+        }
+        if !ref_auds.is_empty() {
+            builder = builder.reference_audios(ref_auds);
+        }
+        if let Some(f) = first {
+            builder = builder.first_frame(f);
+        }
+        if let Some(l) = last {
+            builder = builder.last_frame(l);
         }
         if let Some(np) = negative_prompt {
             builder = builder.negative_prompt(np);
@@ -1851,20 +1906,22 @@ impl Client {
         temperature: Option<f64>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<TranscriptionResult> {
-        let (file_input, extra) = Python::attach(|py| -> PyResult<(
-            CoreFileInput,
-            std::collections::HashMap<String, serde_json::Value>,
-        )> {
-            let file_input = py_to_file_input(file.bind(py))?;
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            Ok((file_input, extra))
-        })?;
+        let (file_input, extra) = Python::attach(
+            |py| -> PyResult<(
+                CoreFileInput,
+                std::collections::HashMap<String, serde_json::Value>,
+            )> {
+                let file_input = py_to_file_input(file.bind(py))?;
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                Ok((file_input, extra))
+            },
+        )?;
 
-        let mut builder = CoreTranscribeRequest::builder(model, file_input)
-            .response_format(response_format);
+        let mut builder =
+            CoreTranscribeRequest::builder(model, file_input).response_format(response_format);
         if let Some(l) = language {
             builder = builder.language(l);
         }
@@ -1907,17 +1964,19 @@ impl Client {
         input: Py<PyAny>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<EmbeddingResult> {
-        let (embed_input, extra) = Python::attach(|py| -> PyResult<(
-            CoreEmbedInput,
-            std::collections::HashMap<String, serde_json::Value>,
-        )> {
-            let embed_input = py_to_embed_input(input.bind(py))?;
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            Ok((embed_input, extra))
-        })?;
+        let (embed_input, extra) = Python::attach(
+            |py| -> PyResult<(
+                CoreEmbedInput,
+                std::collections::HashMap<String, serde_json::Value>,
+            )> {
+                let embed_input = py_to_embed_input(input.bind(py))?;
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                Ok((embed_input, extra))
+            },
+        )?;
 
         let req = CoreEmbedRequest {
             model,
@@ -2032,17 +2091,19 @@ impl Client {
         temperature: Option<f64>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<TranscriptionResult> {
-        let (file_input, extra) = Python::attach(|py| -> PyResult<(
-            CoreFileInput,
-            std::collections::HashMap<String, serde_json::Value>,
-        )> {
-            let file_input = py_to_file_input(file.bind(py))?;
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            Ok((file_input, extra))
-        })?;
+        let (file_input, extra) = Python::attach(
+            |py| -> PyResult<(
+                CoreFileInput,
+                std::collections::HashMap<String, serde_json::Value>,
+            )> {
+                let file_input = py_to_file_input(file.bind(py))?;
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                Ok((file_input, extra))
+            },
+        )?;
 
         let mut builder = CoreTranscribeRequest::builder(model, file_input)
             .response_format(response_format)
@@ -2291,7 +2352,9 @@ impl Router {
             })
             .await
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("router chat_stream 任务失败: {e}"))
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "router chat_stream 任务失败: {e}"
+                ))
             })?;
 
         let stream = stream_result.map_err(map_error)?;
@@ -2315,28 +2378,30 @@ impl Router {
         response_format: &str,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<ImageResult> {
-        let (extra, ref_imgs, mask_input) = Python::attach(|py| -> PyResult<(
-            std::collections::HashMap<String, serde_json::Value>,
-            Vec<CoreFileInput>,
-            Option<CoreFileInput>,
-        )> {
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            let ref_imgs = match &reference_images {
-                Some(imgs) => imgs
-                    .iter()
-                    .map(|i| py_to_file_input(i.bind(py)))
-                    .collect::<PyResult<Vec<_>>>()?,
-                None => Vec::new(),
-            };
-            let mask_input = match &mask {
-                Some(m) => Some(py_to_file_input(m.bind(py))?),
-                None => None,
-            };
-            Ok((extra, ref_imgs, mask_input))
-        })?;
+        let (extra, ref_imgs, mask_input) = Python::attach(
+            |py| -> PyResult<(
+                std::collections::HashMap<String, serde_json::Value>,
+                Vec<CoreFileInput>,
+                Option<CoreFileInput>,
+            )> {
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                let ref_imgs = match &reference_images {
+                    Some(imgs) => imgs
+                        .iter()
+                        .map(|i| py_to_file_input(i.bind(py)))
+                        .collect::<PyResult<Vec<_>>>()?,
+                    None => Vec::new(),
+                };
+                let mask_input = match &mask {
+                    Some(m) => Some(py_to_file_input(m.bind(py))?),
+                    None => None,
+                };
+                Ok((extra, ref_imgs, mask_input))
+            },
+        )?;
 
         let mut builder = CoreImageRequest::builder(model, prompt)
             .size(size)
@@ -2364,7 +2429,9 @@ impl Router {
             })
             .await
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("router image_generate 任务失败: {e}"))
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "router image_generate 任务失败: {e}"
+                ))
             })?;
 
         let r = result.map_err(map_error)?;
@@ -2388,23 +2455,25 @@ impl Router {
         seed: Option<u64>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<VideoTask> {
-        let (extra, ref_imgs) = Python::attach(|py| -> PyResult<(
-            std::collections::HashMap<String, serde_json::Value>,
-            Vec<CoreFileInput>,
-        )> {
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            let ref_imgs = match &reference_images {
-                Some(imgs) => imgs
-                    .iter()
-                    .map(|i| py_to_file_input(i.bind(py)))
-                    .collect::<PyResult<Vec<_>>>()?,
-                None => Vec::new(),
-            };
-            Ok((extra, ref_imgs))
-        })?;
+        let (extra, ref_imgs) = Python::attach(
+            |py| -> PyResult<(
+                std::collections::HashMap<String, serde_json::Value>,
+                Vec<CoreFileInput>,
+            )> {
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                let ref_imgs = match &reference_images {
+                    Some(imgs) => imgs
+                        .iter()
+                        .map(|i| py_to_file_input(i.bind(py)))
+                        .collect::<PyResult<Vec<_>>>()?,
+                    None => Vec::new(),
+                };
+                Ok((extra, ref_imgs))
+            },
+        )?;
 
         let mut builder = CoreVideoRequest::builder(model, prompt)
             .width(width)
@@ -2436,7 +2505,9 @@ impl Router {
             })
             .await
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("router video_create 任务失败: {e}"))
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "router video_create 任务失败: {e}"
+                ))
             })?;
 
         let t = result.map_err(map_error)?;
@@ -2455,7 +2526,9 @@ impl Router {
             })
             .await
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("router video_poll 任务失败: {e}"))
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "router video_poll 任务失败: {e}"
+                ))
             })?;
 
         let s = result.map_err(map_error)?;
@@ -2470,17 +2543,19 @@ impl Router {
         input: Py<PyAny>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<EmbeddingResult> {
-        let (embed_input, extra) = Python::attach(|py| -> PyResult<(
-            CoreEmbedInput,
-            std::collections::HashMap<String, serde_json::Value>,
-        )> {
-            let embed_input = py_to_embed_input(input.bind(py))?;
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            Ok((embed_input, extra))
-        })?;
+        let (embed_input, extra) = Python::attach(
+            |py| -> PyResult<(
+                CoreEmbedInput,
+                std::collections::HashMap<String, serde_json::Value>,
+            )> {
+                let embed_input = py_to_embed_input(input.bind(py))?;
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                Ok((embed_input, extra))
+            },
+        )?;
 
         let req = CoreEmbedRequest {
             model,
@@ -2519,20 +2594,22 @@ impl Router {
         temperature: Option<f64>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<TranscriptionResult> {
-        let (file_input, extra) = Python::attach(|py| -> PyResult<(
-            CoreFileInput,
-            std::collections::HashMap<String, serde_json::Value>,
-        )> {
-            let file_input = py_to_file_input(file.bind(py))?;
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            Ok((file_input, extra))
-        })?;
+        let (file_input, extra) = Python::attach(
+            |py| -> PyResult<(
+                CoreFileInput,
+                std::collections::HashMap<String, serde_json::Value>,
+            )> {
+                let file_input = py_to_file_input(file.bind(py))?;
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                Ok((file_input, extra))
+            },
+        )?;
 
-        let mut builder = CoreTranscribeRequest::builder(model, file_input)
-            .response_format(response_format);
+        let mut builder =
+            CoreTranscribeRequest::builder(model, file_input).response_format(response_format);
         if let Some(l) = language {
             builder = builder.language(l);
         }
@@ -2555,7 +2632,9 @@ impl Router {
             })
             .await
             .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!("router transcribe 任务失败: {e}"))
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "router transcribe 任务失败: {e}"
+                ))
             })?;
 
         let r = result.map_err(map_error)?;
@@ -2575,17 +2654,19 @@ impl Router {
         temperature: Option<f64>,
         kwargs: Option<Py<PyDict>>,
     ) -> PyResult<TranscriptionResult> {
-        let (file_input, extra) = Python::attach(|py| -> PyResult<(
-            CoreFileInput,
-            std::collections::HashMap<String, serde_json::Value>,
-        )> {
-            let file_input = py_to_file_input(file.bind(py))?;
-            let extra = match &kwargs {
-                Some(d) => kwargs_to_extra(d.bind(py))?,
-                None => std::collections::HashMap::new(),
-            };
-            Ok((file_input, extra))
-        })?;
+        let (file_input, extra) = Python::attach(
+            |py| -> PyResult<(
+                CoreFileInput,
+                std::collections::HashMap<String, serde_json::Value>,
+            )> {
+                let file_input = py_to_file_input(file.bind(py))?;
+                let extra = match &kwargs {
+                    Some(d) => kwargs_to_extra(d.bind(py))?,
+                    None => std::collections::HashMap::new(),
+                };
+                Ok((file_input, extra))
+            },
+        )?;
 
         let mut builder = CoreTranscribeRequest::builder(model, file_input)
             .response_format(response_format)

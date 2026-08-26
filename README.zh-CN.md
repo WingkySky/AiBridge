@@ -65,7 +65,7 @@ AIBridge（原名 agn-sdk）是多模态 AI 统一接口 SDK：文本对话（ch
 
 | 类别 | provider |
 |---|---|
-| **MVP** | `openai` `agnes` `volcengine_cv`（火山引擎） `gemini` |
+| **MVP** | `openai` `agnes`（含 `agnes-video-2.5` / `agnes-video-2.5-flash`，视频双契约） `volcengine_cv`（火山引擎） `gemini` |
 | **OpenAI 兼容族** | `azure` `siliconflow`（别名 `sf`） `togetherai`（`together`） `fireworksai`（`fireworks`） `cloudflareai`（`cloudflare` / `workersai`） |
 | **扩展模型** | `grok`（`xaigrok`） `yi`（`lingyiwanwu`） `sensenova`（`shangtang`） `hunyuan`（`tencent_hunyuan`） `groq` |
 | **更多模型** | `deepseek` `stepfun`（`step`） `mistral` `cohere` `perplexity` |

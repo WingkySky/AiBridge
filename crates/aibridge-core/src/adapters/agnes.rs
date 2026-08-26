@@ -27,7 +27,7 @@ use crate::config::{ClientOptions, ProviderConfig};
 use crate::error::{AibridgeError, Result};
 use crate::http::HttpClient;
 use crate::model::chat::{ChatCompletion, ChatRequest};
-use crate::model::common::{ModelInfo, ModelType, TaskStatus, VoiceInfo};
+use crate::model::common::{ModelInfo, ModelType, TaskStatus, VideoMode, VoiceInfo};
 use crate::model::image::{ImageRequest, ImageResult};
 use crate::model::options::{EmbedRequest, EmbeddingResult};
 use crate::model::video::{VideoRequest, VideoStatus, VideoTask};
@@ -35,8 +35,10 @@ use crate::util;
 
 /// Agnes AI 默认 Base URL
 ///
-/// 对应 Python v1 `DEFAULT_BASE_URL`。
-pub const DEFAULT_AGNES_BASE_URL: &str = "https://api.agnes.ai/v1";
+/// 全站统一 OpenAI 兼容域名（见官网概览页），旧域名 `api.agnes.ai` 已废弃。
+/// 文档确认 V2.0 / 2.5 / 2.5-Flash 三档视频模型均落在该域名的 `/v1` 路径下，
+/// 差异仅在模型版本的 mode 词表与参数集，而非域名。对应 Python v1 `DEFAULT_BASE_URL`。
+pub const DEFAULT_AGNES_BASE_URL: &str = "https://apihub.agnes-ai.com/v1";
 
 /// Agnes AI 适配器
 ///
@@ -231,7 +233,108 @@ impl AgnesAdapter {
         }
     }
 
-    /// 构造视频创建请求体
+    /// Agnes Video 2.5 / 2.5-Flash 支持的 aspect_ratio 白名单
+    ///
+    /// 文档明确：不支持 `auto` 或像素直传，仅接受以下值。
+    const V25_ASPECT_RATIOS: &[&str] = &["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"];
+
+    /// 判断模型是否属于 Agnes Video 2.5 / 2.5-Flash 家族（新接口契约）
+    ///
+    /// 该家族走 OpenAI Videos 兼容接口：mode 取 `text`/`keyframe`/`reference`，
+    /// 参数使用 `seconds`/`size`/`aspect_ratio`，轮询必须带 `model_name`。
+    /// 其余模型（含 V2.0）沿用旧的 `ti2vid`/`keyframes`/`multi_reference` 契约。
+    fn is_video_v25(model: &str) -> bool {
+        model == "agnes-video-2.5" || model == "agnes-video-2.5-flash"
+    }
+
+    /// 统一 `VideoMode` → Agnes Video 2.5 的 mode 字符串
+    ///
+    /// - `Text2Video` → `text`
+    /// - `Image2Video` / `Multiimage` / `Video2Video` → `reference`（图/音/视频参考）
+    /// - `Keyframes` → `keyframe`（首尾帧）
+    fn map_video_mode_v25(mode: VideoMode) -> &'static str {
+        match mode {
+            VideoMode::Text2Video => "text",
+            VideoMode::Image2Video | VideoMode::Multiimage | VideoMode::Video2Video => "reference",
+            VideoMode::Keyframes => "keyframe",
+        }
+    }
+
+    /// 归一化 2.5 的 `size` 档位（720P / 960P / 2K），未知值回退 720P
+    fn normalize_v25_size(resolution: &Option<String>) -> &'static str {
+        match resolution.as_deref() {
+            Some(s) => match s.to_uppercase().as_str() {
+                "720P" | "720" => "720P",
+                "960P" | "960" => "960P",
+                "2K" => "2K",
+                _ => "720P",
+            },
+            None => "720P",
+        }
+    }
+
+    /// 校验视频请求参数（仅对 2.5 / 2.5-Flash 做强约束）
+    ///
+    /// - Flash 限制：不支持视频参考（videos）、参考图 ≤ 5 张
+    /// - seconds 范围 4–12（由 `duration` 转换）
+    /// - aspect_ratio 必须在白名单内
+    /// 旧契约（V2.0 等）不做此层校验，沿用其既有参数规则。
+    fn validate_video_request(req: &VideoRequest) -> Result<()> {
+        if !Self::is_video_v25(&req.model) {
+            return Ok(());
+        }
+        // Flash 专属限制
+        if req.model == "agnes-video-2.5-flash" {
+            if !req.reference_videos.is_empty() {
+                return Err(AibridgeError::Validation {
+                    message: "agnes-video-2.5-flash 不支持视频参考（videos 字段）".into(),
+                    details: serde_json::Value::Null,
+                });
+            }
+            if req.reference_images.len() > 5 {
+                return Err(AibridgeError::Validation {
+                    message: format!(
+                        "agnes-video-2.5-flash 参考图最多 5 张，实际收到 {} 张",
+                        req.reference_images.len()
+                    ),
+                    details: serde_json::Value::Null,
+                });
+            }
+        }
+        // 时长 seconds 范围 4–12
+        if let Some(d) = req.duration {
+            if d < 4 || d > 12 {
+                return Err(AibridgeError::Validation {
+                    message: format!("agnes-video-2.5 时长 seconds 必须为 4-12，实际收到 {d}"),
+                    details: serde_json::Value::Null,
+                });
+            }
+        }
+        // 画幅白名单
+        if let Some(ar) = &req.aspect_ratio {
+            if !Self::V25_ASPECT_RATIOS.contains(&ar.as_str()) {
+                return Err(AibridgeError::Validation {
+                    message: format!("agnes-video-2.5 不支持的 aspect_ratio: {ar}"),
+                    details: serde_json::Value::Null,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// 构造视频创建请求体（按模型版本分流）
+    ///
+    /// - 2.5 / 2.5-Flash（`is_video_v25`）：走 OpenAI Videos 兼容契约（见 `build_video_body_v25`）
+    /// - 其余（含 V2.0）：走旧的 `ti2vid`/`keyframes` 契约（见 `build_video_body_v20`）
+    fn build_video_body(req: &VideoRequest) -> Value {
+        if Self::is_video_v25(&req.model) {
+            Self::build_video_body_v25(req)
+        } else {
+            Self::build_video_body_v20(req)
+        }
+    }
+
+    /// 构造 V2.0（旧契约）视频请求体
     ///
     /// 对应 Python v1 `agnes.py:video_create` 的 body 构造逻辑：
     /// - 基础字段：model / prompt
@@ -240,7 +343,7 @@ impl AgnesAdapter {
     ///   - keyframes 模式 + ≥2 图：extra_body.keyframes = { start, end }
     ///   - multiimage 模式 + ≥2 图：extra_body.image = [urls]
     ///   - 其余 ≥1 图：extra_body.image = url
-    fn build_video_body(req: &VideoRequest) -> Value {
+    fn build_video_body_v20(req: &VideoRequest) -> Value {
         let mut body = json!({
             "model": req.model,
             "prompt": req.prompt,
@@ -276,10 +379,10 @@ impl AgnesAdapter {
                 .map(file_input_to_string)
                 .collect();
             let extra_body: Value = match req.mode {
-                crate::model::common::VideoMode::Keyframes if urls.len() >= 2 => json!({
+                VideoMode::Keyframes if urls.len() >= 2 => json!({
                     "keyframes": { "start": urls[0], "end": urls[urls.len() - 1] }
                 }),
-                crate::model::common::VideoMode::Multiimage if urls.len() >= 2 => json!({
+                VideoMode::Multiimage if urls.len() >= 2 => json!({
                     "image": urls
                 }),
                 _ => json!({ "image": urls[0] }),
@@ -296,6 +399,108 @@ impl AgnesAdapter {
         body
     }
 
+    /// 构造 Agnes Video 2.5 / 2.5-Flash 视频请求体（OpenAI Videos 兼容契约）
+    ///
+    /// 参数对齐文档：
+    /// - `mode`：`text` / `keyframe` / `reference`
+    /// - `seconds`：字符串 `"4"`–`"12"`（由 `duration` 转换，默认 `"5"`）
+    /// - `size`：`720P` / `960P` / `2K`（由 `resolution` 归一化，默认 `720P`）
+    /// - `aspect_ratio`：白名单值
+    /// - `seed` / `n`(固定 1)
+    /// - 按 mode 分流媒体：`keyframe` → first_frame/last_frame；
+    ///   `reference` → images/audios/videos（videos 仅 2.5 支持，Flash 已在 `validate_video_request` 拦截）
+    fn build_video_body_v25(req: &VideoRequest) -> Value {
+        let mut body = json!({
+            "model": req.model,
+            "prompt": req.prompt,
+        });
+
+        // mode 映射为 2.5 平台要求的字符串（text / keyframe / reference）
+        body["mode"] = json!(Self::map_video_mode_v25(req.mode));
+
+        // 时长：duration(u32 秒) → seconds(字符串)，默认 "5"
+        let seconds = req
+            .duration
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "5".to_string());
+        body["seconds"] = json!(seconds);
+
+        // 分辨率档位：resolution → size（720P/960P/2K），默认 720P
+        body["size"] = json!(Self::normalize_v25_size(&req.resolution));
+
+        // 画幅（白名单值）
+        if let Some(ar) = &req.aspect_ratio {
+            body["aspect_ratio"] = json!(ar);
+        }
+
+        // 随机种子
+        if let Some(seed) = req.seed {
+            body["seed"] = json!(seed);
+        }
+
+        // 生成数量：API 仅支持 1，默认显式下发 1；允许 extra 覆盖（测试/高级场景）
+        let n = req.extra.get("n").and_then(|v| v.as_u64()).unwrap_or(1);
+        body["n"] = json!(n);
+
+        // 按 mode 分流媒体字段
+        match req.mode {
+            VideoMode::Keyframes => {
+                if let Some(f) = &req.first_frame {
+                    body["first_frame"] = json!(file_input_to_string(f));
+                }
+                if let Some(l) = &req.last_frame {
+                    body["last_frame"] = json!(file_input_to_string(l));
+                }
+            }
+            VideoMode::Image2Video | VideoMode::Multiimage | VideoMode::Video2Video => {
+                let images: Vec<String> = req
+                    .reference_images
+                    .iter()
+                    .map(file_input_to_string)
+                    .collect();
+                if !images.is_empty() {
+                    body["images"] = json!(images);
+                }
+                let audios: Vec<String> = req
+                    .reference_audios
+                    .iter()
+                    .map(file_input_to_string)
+                    .collect();
+                if !audios.is_empty() {
+                    body["audios"] = json!(audios);
+                }
+                // 视频参考：仅 2.5 支持（Flash 已在校验阶段拦截），此处按统一结构下发
+                if let VideoMode::Video2Video = req.mode {
+                    let videos: Vec<Value> = req
+                        .reference_videos
+                        .iter()
+                        .map(|v| {
+                            json!({
+                                "url": file_input_to_string(v),
+                                "start_seconds": 0,
+                                "require_audio": false
+                            })
+                        })
+                        .collect();
+                    if !videos.is_empty() {
+                        body["videos"] = json!(videos);
+                    }
+                }
+            }
+            VideoMode::Text2Video => {}
+        }
+
+        // extra 透传：合并到顶层（排除已单独处理的 n）
+        if let Some(obj) = body.as_object_mut() {
+            for (k, v) in &req.extra {
+                if k != "n" {
+                    obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        body
+    }
+
     /// 解析视频创建响应 → VideoTask
     ///
     /// 对应 Python v1 `agnes.py:video_create` 的响应解析：
@@ -303,10 +508,13 @@ impl AgnesAdapter {
     /// - status：默认 "pending"
     /// - created_at：默认当前时间戳
     fn parse_video_task(value: &Value, model: &str) -> VideoTask {
+        // 优先 video_id：轮询接口（/agnesapi?video_id=...）以 video_id 为查询键，
+        // 文档要求保存并使用 video_id 进行后续轮询。回退到 id / task_id。
         let task_id = value
-            .get("id")
+            .get("video_id")
             .and_then(|v| v.as_str())
-            .or_else(|| value.get("video_id").and_then(|v| v.as_str()))
+            .or_else(|| value.get("id").and_then(|v| v.as_str()))
+            .or_else(|| value.get("task_id").and_then(|v| v.as_str()))
             .map(str::to_owned)
             .unwrap_or_else(|| util::generate_id("vid"));
         let status = value
@@ -330,7 +538,7 @@ impl AgnesAdapter {
     ///
     /// 对应 Python v1 `agnes.py:video_poll` 的响应解析：
     /// - status：默认 "pending"
-    /// - video_url：优先顶层 `video_url`，回退 `output.video_url`
+    /// - video_url：优先顶层 `video_url`，回退 `output.video_url`，再回退 `metadata.url`
     /// - progress / error / created / updated 透传
     fn parse_video_status(value: &Value, task_id: &str) -> VideoStatus {
         let status = value
@@ -346,6 +554,14 @@ impl AgnesAdapter {
                 value
                     .get("output")
                     .and_then(|o| o.get("video_url"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+            })
+            .or_else(|| {
+                // 2.5 / 2.5-Flash / V2.0 成功响应统一将视频地址放在 metadata.url
+                value
+                    .get("metadata")
+                    .and_then(|m| m.get("url"))
                     .and_then(|v| v.as_str())
                     .map(str::to_owned)
             });
@@ -477,6 +693,8 @@ impl Adapter for AgnesAdapter {
                 capability: format!("{} (provider: agnes)", Capabilities::VideoGenerate.as_str()),
             });
         }
+        // 2.5 / 2.5-Flash 专属参数校验（不符直接返回 Validation，避免无效请求）
+        Self::validate_video_request(&req)?;
         let body = Self::build_video_body(&req);
         let value = self.post_authed_json("videos", &body).await?;
         Ok(Self::parse_video_task(&value, &req.model))
@@ -484,9 +702,10 @@ impl Adapter for AgnesAdapter {
 
     /// 查询视频任务状态（Agnes 特有协议）
     ///
-    /// 优先走 poll_url（Agnes 特有的 /agnesapi 轮询通道，带 video_id/model_name query），
-    /// 网络错误时回退到 GET /videos/{task_id}。对应 Python v1 `agnes.py:video_poll`
-    /// 的双路径策略。
+    /// 2.5 / 2.5-Flash 必须带 `model_name` 走 `/agnesapi` 轮询通道；显式配置了 `poll_url`
+    /// 时也走该通道。其余模型（含 V2.0）沿用 `/videos/{task_id}` 兼容路径。
+    /// 网络错误时回退到 `/videos/{task_id}`。对应 Python v1 `agnes.py:video_poll`
+    /// 的双路径策略（以模型版本分流）。
     async fn video_poll(&self, task_id: &str, model: &str) -> Result<VideoStatus> {
         if !self
             .capabilities_set()
@@ -497,10 +716,15 @@ impl Adapter for AgnesAdapter {
             });
         }
 
-        // 优先走 poll_url 通道（若配置）
-        if let Some(poll_url) = &self.poll_url {
+        // 2.5/2.5-Flash 或显式配置 poll_url 时，走 /agnesapi 通道（带 video_id + model_name）
+        let use_agnesapi = self.poll_url.is_some() || Self::is_video_v25(model);
+        if use_agnesapi {
+            let path = self
+                .poll_url
+                .clone()
+                .unwrap_or_else(|| "agnesapi".to_string());
             let query: [(&str, &str); 2] = [("video_id", task_id), ("model_name", model)];
-            match self.get_authed_json(poll_url, &query).await {
+            match self.get_authed_json(&path, &query).await {
                 Ok(value) => return Ok(Self::parse_video_status(&value, task_id)),
                 Err(AibridgeError::Network(_) | AibridgeError::Timeout) => {
                     // 网络错误时回退到 /videos/{task_id}（旧版兼容路径）
@@ -513,7 +737,7 @@ impl Adapter for AgnesAdapter {
             }
         }
 
-        // 无 poll_url：直接走 /videos/{task_id}
+        // 无 agnesapi 通道：直接走 /videos/{task_id}
         let value = self
             .get_authed_json(&format!("videos/{task_id}"), &[])
             .await?;
@@ -1340,10 +1564,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_video_task_uses_id_first() {
+    fn parse_video_task_prefers_video_id_over_id() {
+        // v2.5 契约：轮询接口（/agnesapi?video_id=...）以 video_id 为查询键，
+        // 因此解析时 video_id 优先于 id / task_id
         let value = json!({"id": "t-id", "video_id": "t-vid", "status": "pending"});
         let task = AgnesAdapter::parse_video_task(&value, "m");
-        assert_eq!(task.task_id, "t-id");
+        assert_eq!(task.task_id, "t-vid");
         assert_eq!(task.model, "m");
         assert_eq!(task.status, TaskStatus::Pending);
     }
@@ -1521,6 +1747,467 @@ mod tests {
     #[test]
     fn agnes_default_base_url_differs_from_openai() {
         assert_ne!(DEFAULT_AGNES_BASE_URL, DEFAULT_OPENAI_BASE_URL);
-        assert_eq!(DEFAULT_AGNES_BASE_URL, "https://api.agnes.ai/v1");
+        assert_eq!(DEFAULT_AGNES_BASE_URL, "https://apihub.agnes-ai.com/v1");
+    }
+
+    // ============ 2.5 / 2.5-Flash 双契约路由分流 ============
+
+    /// 新模型（agnes-video-2.5 / 2.5-flash）走 v25 OpenAI Videos 兼容契约：
+    /// 下发 seconds/size/aspect_ratio，且不残留 v20 专属字段（width/height/extra_body）。
+    #[test]
+    fn build_video_body_routes_v25_to_new_contract() {
+        let req = VideoRequest::builder("agnes-video-2.5", "a cat")
+            .width(1920)
+            .height(1080)
+            .duration(8)
+            .resolution("960P")
+            .aspect_ratio("16:9")
+            .build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["mode"], "text");
+        assert_eq!(body["seconds"], "8");
+        assert_eq!(body["size"], "960P");
+        assert_eq!(body["aspect_ratio"], "16:9");
+        assert!(body.get("width").is_none(), "v25 不应下发 width");
+        assert!(body.get("height").is_none(), "v25 不应下发 height");
+        assert!(body.get("extra_body").is_none(), "v25 不应下发 extra_body");
+    }
+
+    /// 旧模型（含 V2.0 / seedance-2.0）走 v20 契约：下发 width/height 与 mode=ti2vid，
+    /// 且不应出现 v25 专属字段（seconds/size/aspect_ratio）。
+    #[test]
+    fn build_video_body_routes_legacy_to_v20_contract() {
+        let req = VideoRequest::builder("seedance-2.0", "a cat")
+            .width(1920)
+            .height(1080)
+            .mode(VideoMode::Image2Video)
+            .build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["mode"], "ti2vid");
+        assert_eq!(body["width"], 1920);
+        assert_eq!(body["height"], 1080);
+        assert!(body.get("seconds").is_none());
+        assert!(body.get("size").is_none());
+        assert!(body.get("aspect_ratio").is_none());
+    }
+
+    // ============ build_video_body_v25 单元测试 ============
+
+    #[test]
+    fn build_video_body_v25_defaults_seconds_to_5_and_size_720p() {
+        let req = VideoRequest::builder("agnes-video-2.5", "a cat").build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["seconds"], "5");
+        assert_eq!(body["size"], "720P");
+        assert_eq!(body["n"], 1);
+    }
+
+    #[test]
+    fn build_video_body_v25_text2video_minimal_has_no_media_fields() {
+        let req = VideoRequest::builder("agnes-video-2.5", "a cat").build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["mode"], "text");
+        assert!(body.get("images").is_none());
+        assert!(body.get("audios").is_none());
+        assert!(body.get("videos").is_none());
+        assert!(body.get("first_frame").is_none());
+        assert!(body.get("last_frame").is_none());
+    }
+
+    #[test]
+    fn build_video_body_v25_keyframe_mode_uses_first_last_frame() {
+        let req = VideoRequest::builder("agnes-video-2.5", "animate")
+            .mode(VideoMode::Keyframes)
+            .first_frame(FileInput::url("https://x.com/start.png"))
+            .last_frame(FileInput::url("https://x.com/end.png"))
+            .build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["mode"], "keyframe");
+        assert_eq!(body["first_frame"], "https://x.com/start.png");
+        assert_eq!(body["last_frame"], "https://x.com/end.png");
+        assert!(body.get("images").is_none());
+        assert!(body.get("extra_body").is_none());
+    }
+
+    #[test]
+    fn build_video_body_v25_reference_mode_uses_images_and_audios() {
+        let req = VideoRequest::builder("agnes-video-2.5", "animate")
+            .mode(VideoMode::Image2Video)
+            .reference_images(vec![
+                FileInput::url("https://x.com/a.png"),
+                FileInput::url("https://x.com/b.png"),
+            ])
+            .reference_audios(vec![FileInput::url("https://x.com/a.mp3")])
+            .build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["mode"], "reference");
+        let imgs = body["images"].as_array().unwrap();
+        assert_eq!(imgs.len(), 2);
+        assert_eq!(imgs[0], "https://x.com/a.png");
+        let auds = body["audios"].as_array().unwrap();
+        assert_eq!(auds.len(), 1);
+        assert_eq!(auds[0], "https://x.com/a.mp3");
+        assert!(body.get("first_frame").is_none());
+    }
+
+    #[test]
+    fn build_video_body_v25_video2video_includes_videos() {
+        let req = VideoRequest::builder("agnes-video-2.5", "remix")
+            .mode(VideoMode::Video2Video)
+            .reference_videos(vec![FileInput::url("https://x.com/src.mp4")])
+            .build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["mode"], "reference");
+        let vids = body["videos"].as_array().unwrap();
+        assert_eq!(vids.len(), 1);
+        assert_eq!(vids[0]["url"], "https://x.com/src.mp4");
+        assert_eq!(vids[0]["start_seconds"], 0);
+        assert_eq!(vids[0]["require_audio"], false);
+    }
+
+    #[test]
+    fn build_video_body_v25_applies_seconds_size_aspect_and_n() {
+        let req = VideoRequest::builder("agnes-video-2.5", "a cat")
+            .duration(8)
+            .resolution("960P")
+            .aspect_ratio("16:9")
+            .extra("n", 2)
+            .build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["seconds"], "8");
+        assert_eq!(body["size"], "960P");
+        assert_eq!(body["aspect_ratio"], "16:9");
+        assert_eq!(body["n"], 2, "extra.n 应覆盖默认 1");
+    }
+
+    #[test]
+    fn build_video_body_v25_extra_passthrough_excluding_n() {
+        let req = VideoRequest::builder("agnes-video-2.5", "a cat")
+            .extra("custom", "value")
+            .build();
+        let body = AgnesAdapter::build_video_body(&req);
+        assert_eq!(body["custom"], "value");
+        assert_eq!(body["n"], 1, "未显式给 n 时默认 1");
+    }
+
+    // ============ 2.5 模式 / 尺寸映射单元测试 ============
+
+    #[test]
+    fn map_video_mode_v25_maps_correctly() {
+        assert_eq!(
+            AgnesAdapter::map_video_mode_v25(VideoMode::Text2Video),
+            "text"
+        );
+        assert_eq!(
+            AgnesAdapter::map_video_mode_v25(VideoMode::Keyframes),
+            "keyframe"
+        );
+        assert_eq!(
+            AgnesAdapter::map_video_mode_v25(VideoMode::Image2Video),
+            "reference"
+        );
+        assert_eq!(
+            AgnesAdapter::map_video_mode_v25(VideoMode::Multiimage),
+            "reference"
+        );
+        assert_eq!(
+            AgnesAdapter::map_video_mode_v25(VideoMode::Video2Video),
+            "reference"
+        );
+    }
+
+    #[test]
+    fn normalize_v25_size_maps_resolutions() {
+        assert_eq!(
+            AgnesAdapter::normalize_v25_size(&Some("720P".into())),
+            "720P"
+        );
+        assert_eq!(
+            AgnesAdapter::normalize_v25_size(&Some("960P".into())),
+            "960P"
+        );
+        assert_eq!(AgnesAdapter::normalize_v25_size(&Some("2K".into())), "2K");
+        assert_eq!(
+            AgnesAdapter::normalize_v25_size(&Some("720".into())),
+            "720P"
+        );
+        assert_eq!(
+            AgnesAdapter::normalize_v25_size(&Some("unknown".into())),
+            "720P"
+        );
+        assert_eq!(AgnesAdapter::normalize_v25_size(&None), "720P");
+    }
+
+    // ============ validate_video_request 单元测试（仅 2.5 家族生效） ============
+
+    #[test]
+    fn validate_video_request_skips_checks_for_legacy_models() {
+        // 旧模型即使超出 2.5 限制也应直接放行（沿用各自契约）
+        let req = VideoRequest::builder("seedance-2.0", "p")
+            .reference_images(vec![
+                FileInput::url("https://x.com/1.png"),
+                FileInput::url("https://x.com/2.png"),
+                FileInput::url("https://x.com/3.png"),
+                FileInput::url("https://x.com/4.png"),
+                FileInput::url("https://x.com/5.png"),
+                FileInput::url("https://x.com/6.png"),
+            ])
+            .duration(3)
+            .build();
+        assert!(AgnesAdapter::validate_video_request(&req).is_ok());
+    }
+
+    #[test]
+    fn validate_video_request_flash_rejects_video_reference() {
+        let req = VideoRequest::builder("agnes-video-2.5-flash", "p")
+            .mode(VideoMode::Video2Video)
+            .reference_videos(vec![FileInput::url("https://x.com/s.mp4")])
+            .build();
+        let err = AgnesAdapter::validate_video_request(&req).unwrap_err();
+        assert!(matches!(err, AibridgeError::Validation { .. }));
+    }
+
+    #[test]
+    fn validate_video_request_flash_rejects_more_than_5_images() {
+        let imgs: Vec<FileInput> = (0..6)
+            .map(|i| FileInput::url(format!("https://x.com/{i}.png")))
+            .collect();
+        let req = VideoRequest::builder("agnes-video-2.5-flash", "p")
+            .reference_images(imgs)
+            .build();
+        let err = AgnesAdapter::validate_video_request(&req).unwrap_err();
+        assert!(matches!(err, AibridgeError::Validation { .. }));
+    }
+
+    #[test]
+    fn validate_video_request_flash_allows_up_to_5_images() {
+        let imgs: Vec<FileInput> = (0..5)
+            .map(|i| FileInput::url(format!("https://x.com/{i}.png")))
+            .collect();
+        let req = VideoRequest::builder("agnes-video-2.5-flash", "p")
+            .reference_images(imgs)
+            .build();
+        assert!(AgnesAdapter::validate_video_request(&req).is_ok());
+    }
+
+    #[test]
+    fn validate_video_request_25_enforces_duration_range() {
+        for d in [3u32, 13] {
+            let req = VideoRequest::builder("agnes-video-2.5", "p")
+                .duration(d)
+                .build();
+            assert!(
+                AgnesAdapter::validate_video_request(&req).is_err(),
+                "duration {d} 应被拒绝"
+            );
+        }
+        let ok = VideoRequest::builder("agnes-video-2.5", "p")
+            .duration(8)
+            .build();
+        assert!(AgnesAdapter::validate_video_request(&ok).is_ok());
+    }
+
+    #[test]
+    fn validate_video_request_25_enforces_aspect_ratio_whitelist() {
+        let bad = VideoRequest::builder("agnes-video-2.5", "p")
+            .aspect_ratio("1:1:1")
+            .build();
+        assert!(AgnesAdapter::validate_video_request(&bad).is_err());
+        let good = VideoRequest::builder("agnes-video-2.5", "p")
+            .aspect_ratio("16:9")
+            .build();
+        assert!(AgnesAdapter::validate_video_request(&good).is_ok());
+    }
+
+    #[test]
+    fn validate_video_request_25_allows_video_reference_unlike_flash() {
+        // 2.5（非 Flash）支持视频参考
+        let req = VideoRequest::builder("agnes-video-2.5", "p")
+            .mode(VideoMode::Video2Video)
+            .reference_videos(vec![FileInput::url("https://x.com/s.mp4")])
+            .build();
+        assert!(AgnesAdapter::validate_video_request(&req).is_ok());
+    }
+
+    // ============ parse_video_status 元数据地址解析 ============
+
+    #[test]
+    fn parse_video_status_extracts_metadata_url() {
+        // 2.5 / V2.0 成功响应统一将视频地址放在 metadata.url
+        let value = json!({
+            "status": "success",
+            "metadata": { "url": "https://x.com/meta.mp4" }
+        });
+        let s = AgnesAdapter::parse_video_status(&value, "t-1");
+        assert_eq!(s.video_url.as_deref(), Some("https://x.com/meta.mp4"));
+    }
+
+    // ============ video_create 集成测试（v25 契约） ============
+
+    #[tokio::test]
+    async fn video_create_v25_posts_openai_compatible_body() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/videos")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "model": "agnes-video-2.5",
+                "prompt": "a cat",
+                "mode": "text",
+                "seconds": "5",
+                "size": "720P",
+                "n": 1
+            })))
+            .with_status(200)
+            .with_body(json!({"id": "v25-1", "status": "pending"}).to_string())
+            .create_async()
+            .await;
+
+        let adapter = make_adapter_no_poll(&server);
+        let req = VideoRequest::builder("agnes-video-2.5", "a cat").build();
+        let task = adapter
+            .video_create(req)
+            .await
+            .expect("v25 video_create 应成功");
+        assert_eq!(task.task_id, "v25-1");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn video_create_v25_sends_seconds_size_aspect() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/videos")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "model": "agnes-video-2.5",
+                "mode": "text",
+                "seconds": "8",
+                "size": "960P",
+                "aspect_ratio": "16:9"
+            })))
+            .with_status(200)
+            .with_body(json!({"id": "v25-2"}).to_string())
+            .create_async()
+            .await;
+
+        let adapter = make_adapter_no_poll(&server);
+        let req = VideoRequest::builder("agnes-video-2.5", "a cat")
+            .duration(8)
+            .resolution("960P")
+            .aspect_ratio("16:9")
+            .build();
+        let _ = adapter.video_create(req).await.unwrap();
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn video_create_v25_keyframe_sends_first_last_frame() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/videos")
+            .match_body(mockito::Matcher::PartialJson(json!({
+                "model": "agnes-video-2.5",
+                "mode": "keyframe",
+                "first_frame": "https://x.com/start.png",
+                "last_frame": "https://x.com/end.png"
+            })))
+            .with_status(200)
+            .with_body(json!({"id": "v25-3"}).to_string())
+            .create_async()
+            .await;
+
+        let adapter = make_adapter_no_poll(&server);
+        let req = VideoRequest::builder("agnes-video-2.5", "animate")
+            .mode(VideoMode::Keyframes)
+            .first_frame(FileInput::url("https://x.com/start.png"))
+            .last_frame(FileInput::url("https://x.com/end.png"))
+            .build();
+        let _ = adapter.video_create(req).await.unwrap();
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn video_create_v25_validation_failure_short_circuits_request() {
+        // Flash 传入视频参考 → validate 阶段直接抛 Validation，不应触碰 /videos
+        let mut server = Server::new_async().await;
+        let blocked = server
+            .mock("POST", "/videos")
+            .expect(0)
+            .create_async()
+            .await;
+
+        let adapter = make_adapter_no_poll(&server);
+        let req = VideoRequest::builder("agnes-video-2.5-flash", "p")
+            .mode(VideoMode::Video2Video)
+            .reference_videos(vec![FileInput::url("https://x.com/s.mp4")])
+            .build();
+        let err = adapter.video_create(req).await.unwrap_err();
+        assert!(matches!(err, AibridgeError::Validation { .. }));
+        blocked.assert_async().await;
+    }
+
+    // ============ video_poll 集成测试（v25 走 /agnesapi 通道） ============
+
+    #[tokio::test]
+    async fn video_poll_v25_uses_agnesapi_channel_with_model_name() {
+        let mut server = Server::new_async().await;
+        // v25 默认走 /agnesapi 通道（带 video_id + model_name）
+        let body = json!({
+            "status": "success",
+            "metadata": { "url": "https://x.com/v25.mp4" }
+        });
+        let mock = server
+            .mock("GET", "/agnesapi")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("video_id".into(), "v25-task".into()),
+                mockito::Matcher::UrlEncoded("model_name".into(), "agnes-video-2.5".into()),
+            ]))
+            .with_status(200)
+            .with_body(body.to_string())
+            .create_async()
+            .await;
+        // /videos/{id} 不应被调用（v25 走 agnesapi，且非网络错误不回退）
+        let fallback = server
+            .mock("GET", "/videos/v25-task")
+            .expect(0)
+            .create_async()
+            .await;
+
+        let adapter = make_adapter_no_poll(&server);
+        let status = adapter
+            .video_poll("v25-task", "agnes-video-2.5")
+            .await
+            .expect("v25 poll 应成功");
+        assert_eq!(status.status, TaskStatus::Success);
+        assert_eq!(status.video_url.as_deref(), Some("https://x.com/v25.mp4"));
+        mock.assert_async().await;
+        fallback.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn video_poll_v25_flash_also_uses_agnesapi_channel() {
+        let mut server = Server::new_async().await;
+        let body = json!({
+            "status": "processing",
+            "progress": 30
+        });
+        let mock = server
+            .mock("GET", "/agnesapi")
+            .match_query(mockito::Matcher::UrlEncoded(
+                "model_name".into(),
+                "agnes-video-2.5-flash".into(),
+            ))
+            .with_status(200)
+            .with_body(body.to_string())
+            .create_async()
+            .await;
+
+        let adapter = make_adapter_no_poll(&server);
+        let status = adapter
+            .video_poll("f-task", "agnes-video-2.5-flash")
+            .await
+            .unwrap();
+        assert_eq!(status.status, TaskStatus::Processing);
+        assert_eq!(status.progress, Some(30));
+        mock.assert_async().await;
     }
 }
