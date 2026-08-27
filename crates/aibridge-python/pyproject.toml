@@ -3,7 +3,10 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "aibridge"
+# PyPI 分发名：aibridge（已被他人占坑注册零文件空项目，无法使用），
+# 改用 aibridge-sdk 发布。注意 module-name 仍为 aibridge，import 语句不受影响：
+#   pip install aibridge-sdk && import aibridge
+name = "aibridge-sdk"
 description = "AIBridge - 跨语言多模态 AI 统一接口 SDK（Rust 核心，一套 API 调用 38+ provider：chat/image/video/embed/TTS/ASR）"
 # PyPI 搜索与依赖解析只认本文件；README 展示取根目录双语文档
 readme = "../../README.zh-CN.md"
