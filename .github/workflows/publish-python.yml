@@ -35,8 +35,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # universal2 是 maturin 虚拟目标（一个 wheel 覆盖 x86_64 + arm64），
+          # rustup 需装两个真实 target（见 rust_targets）
           - os: macos-latest
             target: universal2-apple-darwin
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
             label: macOS-universal2
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
@@ -54,7 +57,9 @@ jobs:
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          # rustup 无 universal2 target（maturin 虚拟目标），需装两个真实 target；
+          # 其余平台 rustup target 与 maturin target 一致
+          targets: ${{ matrix.rust_targets || matrix.target }}
 
       - name: Rust 缓存
         uses: Swatinem/rust-cache@v2
@@ -77,10 +82,6 @@ jobs:
           if [[ "${{ matrix.label }}" == "manylinux-x86_64" ]]; then
             ARGS="$ARGS --sdist"
           fi
-          # maturin 通过环境变量识别 manylinux 目标
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            export RUSTFLAGS="-C link-arg=-Wl,-lstdc++"
-          fi
           maturin build --release $ARGS
 
       - name: 上传构建产物
@@ -96,9 +97,8 @@ jobs:
     runs-on: ubuntu-latest
     # 仅 tag 推送或手动 dry_run=false 时发布
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
-    environment: pypi
     permissions:
-      # PyPI 信任发布（trusted publishing）所需的 OIDC 权限
+      # PyPI 信任发布（trusted publishing）所需的 OIDC 权限（备用）
       id-token: write
 
     steps:
