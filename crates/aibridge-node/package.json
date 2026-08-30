@@ -1,6 +1,6 @@
 {
   "name": "aibridge",
-  "version": "2.0.0-alpha.1",
+  "version": "2.1.0",
   "description": "AIBridge Node.js 绑定（napi-rs，直连 aibridge-core，原生 Promise）",
   "main": "lib.js",
   "types": "index.d.ts",

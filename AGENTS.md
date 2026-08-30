@@ -9,7 +9,7 @@
 ## 1. 项目现状
 
 - **当前主线**：AIBridge v2 - 跨语言 AI 统一接口 SDK（Rust 核心 + Python / JS-TS / Go / JVM / .NET 五语言原生绑定）
-- **版本**：`2.0.0-alpha.1`（见 `Cargo.toml`），阶段 3 发布收尾中
+- **版本**：`2.1.0`（见 `Cargo.toml`），阶段 3 发布收尾中
 - **能力**：chat（含流式）/ image / video / TTS / ASR / embed，38 个真实 provider + 1 个 mock（echo）
 - **v1 状态**：Python v1（`agn-sdk`）已全量迁移至 v2，旧代码已于 2026-08-30 从仓库移除（git tag `v1.3.3` 可随时找回）。老用户参考 [迁移指南](docs/migration-guide.md)
 
