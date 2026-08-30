@@ -5,12 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.1] - 2026-08-30
 
 ### Added
 
 **阶段 3 发布收尾（2026-08-30）：**
-- 五语言绑定发布 workflow：新增 `.github/workflows/publish-bindings.yml`（Node npm 多平台 napi 构建 + npm publish、JVM jar 平台 classifier、.NET NuGet 组包 + nuget push、Go 动态库 GitHub Release 附件；tag 触发，支持 dry_run）
+- 五语言绑定发布 workflow：新增 `.github/workflows/publish-bindings.yml`（Node npm 多平台 napi 构建 + npm publish、JVM jar 平台 classifier、.NET NuGet 组包 + 信任发布、Go 动态库 GitHub Release 附件；tag 触发，支持 dry_run）
 - JVM 绑定 `build.gradle.kts` 新增 `maven-publish` 配置（`io.aibridge:aibridge:2.1.0`，支持 `publishToMavenLocal` 验证）
 - Python 绑定 e2e：新增 `tests/test_python_binding_full.py`（5 用例：list_voices / recommend_voices / Router 路由 chat）
 - 仓库新增 `pytest.ini`（v1 归档后承接 pytest 配置）

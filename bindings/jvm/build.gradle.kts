@@ -17,7 +17,7 @@ plugins {
 }
 
 group = "io.aibridge"
-version = "2.1.0"
+version = "2.1.1"
 
 java {
     toolchain {
@@ -130,7 +130,7 @@ publishing {
         create<MavenPublication>("maven") {
             groupId = "io.aibridge"
             artifactId = "aibridge"
-            version = "2.1.0"
+            version = "2.1.1"
             from(components["java"])
         }
     }

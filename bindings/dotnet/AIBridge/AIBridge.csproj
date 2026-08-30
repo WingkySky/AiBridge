@@ -58,7 +58,7 @@
   <PropertyGroup>
     <PackageId>AIBridge</PackageId>
     <IsPackable>true</IsPackable>
-    <PackageVersion>2.1.0</PackageVersion>
+    <PackageVersion>2.1.1</PackageVersion>
     <Description>AIBridge .NET 绑定（P/Invoke，直连 aibridge-ffi）</Description>
   </PropertyGroup>
 

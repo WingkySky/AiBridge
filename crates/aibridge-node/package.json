@@ -1,6 +1,6 @@
 {
   "name": "aibridge",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "AIBridge Node.js 绑定（napi-rs，直连 aibridge-core，原生 Promise）",
   "main": "lib.js",
   "types": "index.d.ts",
@@ -8,7 +8,7 @@
   "author": "WingkySky <wingky@example.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/WingkySky/aibridge",
+    "url": "https://github.com/WingkySky/AiBridge",
     "directory": "crates/aibridge-node"
   },
   "keywords": [
