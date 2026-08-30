@@ -121,6 +121,8 @@ jobs:
         working-directory: crates/aibridge-node
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # napi prepublish 需要访问 GitHub API（获取仓库元数据组装平台子包）
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           npx napi prepublish -t npm
           npm publish --access public
@@ -237,12 +239,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: NuGet 登录（OIDC 信任发布，换发临时 API key）
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.dry_run == 'false')
         uses: nuget/login@v1
         id: nuget-login
         with:
           # nuget.org 的 Package owner（账号名，见 Trusted Publishing 页 Package owner 字段）
-          user-oidc: wingkysky
+          user: wingkysky
       - name: 安装 .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -368,11 +370,11 @@ jobs:
         run: |
           mkdir -p release-assets
           # JVM jar（平台 classifier）
-          find artifacts/jvm-* -name '*.jar' -exec cp {} release-assets/ \;
-          # NuGet 包
-          find artifacts/nuget-package -name '*.nupkg' -exec cp {} release-assets/ \;
+          find artifacts/jvm-* -name '*.jar' -exec cp {} release-assets/ \; 2>/dev/null || true
+          # NuGet 包（dotnet-publish 失败时可能缺失，容错跳过）
+          find artifacts/nuget-package -name '*.nupkg' -exec cp {} release-assets/ \; 2>/dev/null || true
           # Go 动态库
-          find artifacts/go-* -name 'libaibridge-*' -exec cp {} release-assets/ \;
+          find artifacts/go-* -name 'libaibridge-*' -exec cp {} release-assets/ \; 2>/dev/null || true
           ls -lh release-assets
       - name: 创建 GitHub Release 并上传附件
         uses: softprops/action-gh-release@v2
