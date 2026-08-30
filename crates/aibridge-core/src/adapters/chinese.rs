@@ -2,10 +2,12 @@
 //!
 //! 对应 Python v1 (agn-sdk) 的 `agn/adapters/chinese.py`。
 //!
-//! 支持六个中文 AI 模型 Provider（文档见各适配器注释）：
+//! 支持七个中文 AI 模型 Provider（文档见各适配器注释）：
 //! - **通义千问 Qwen**（阿里 DashScope）：OpenAI 兼容协议
 //! - **智谱 AI Zhipu**（GLM）：OpenAI 兼容协议
 //! - **豆包 Doubao**（字节火山引擎方舟）：OpenAI 兼容协议
+//! - **豆包 Agent Plan**（火山引擎订阅套餐）：OpenAI 兼容协议（专属 Base URL，
+//!   list_models 走硬编码套餐模型清单）
 //! - **文心一言 ERNIE**（百度千帆）：**独立协议**（access_token 认证 + 特有端点 + 特有请求体/响应）
 //! - **Kimi**（月之暗面 Moonshot AI）：OpenAI 兼容协议
 //! - **MiniMax**（稀宇科技）：OpenAI 兼容协议（chat 部分）
@@ -48,6 +50,7 @@ use futures::stream::{StreamExt, TryStreamExt};
 use serde_json::{json, Value};
 
 use crate::adapter::{Adapter, Capabilities, CapabilitySet, ChatStream};
+use crate::adapters::anthropic::{AnthropicAdapter, ANTHROPIC_API_VERSION};
 use crate::adapters::openai_compat::OpenAiCompatAdapter;
 use crate::config::ProviderConfig;
 use crate::error::{AibridgeError, Result};
@@ -80,6 +83,25 @@ pub const DEFAULT_ZHIPU_BASE_URL: &str = "https://open.bigmodel.cn/api/paas/v4";
 /// 已含 `/api/v3` 前缀，chat 端点为 `POST /chat/completions`，
 /// models 端点为 `GET /models`。
 pub const DEFAULT_DOUBAO_BASE_URL: &str = "https://ark.cn-beijing.volces.com/api/v3";
+
+/// 豆包 Agent Plan 默认 Base URL
+///
+/// Agent Plan 为火山方舟订阅式套餐，使用**专属 Base URL**（`/api/plan/v3`）与
+/// **专属 API Key**（与普通方舟 API Key 不通用）。已含 `/api/plan/v3` 前缀，
+/// chat 端点为 `POST /chat/completions`。套餐数据面无 `GET /models` 端点
+/// （实测返回 404），list_models 走硬编码套餐模型清单。
+/// 文档: <https://www.volcengine.com/docs/82379/2366394>
+pub const DEFAULT_DOUBAO_AGENT_PLAN_BASE_URL: &str =
+    "https://ark.cn-beijing.volces.com/api/plan/v3";
+
+/// 豆包 Agent Plan Anthropic 协议默认 Base URL
+///
+/// Agent Plan 同时兼容 Anthropic 接口协议（适用 Claude Code 等 Anthropic 生态
+/// 工具），messages 端点为 `POST /v1/messages`（由 [`AnthropicAdapter`] 的
+/// url 拼接逻辑自动补 `/v1` 前缀）。认证沿用适配器的 `x-api-key` header
+/// （实测 Agent Plan 端点同时接受 `x-api-key` 与 `Bearer` 两种认证）。
+pub const DEFAULT_DOUBAO_AGENT_PLAN_ANTHROPIC_BASE_URL: &str =
+    "https://ark.cn-beijing.volces.com/api/plan";
 
 /// 文心一言 ERNIE 默认 Base URL
 ///
@@ -440,6 +462,367 @@ impl Adapter for DoubaoAdapter {
 
     // image_generate / video_create / video_poll / embed / transcribe / speech / list_voices
     // 走 trait 默认实现，返 UnsupportedCapability。
+}
+
+// ==================== 豆包 Agent Plan 适配器 ====================
+
+/// Agent Plan 上游协议选择
+///
+/// Agent Plan 官方同时兼容两种接入协议：
+/// - **OpenAI**（默认）：`https://ark.cn-beijing.volces.com/api/plan/v3`
+/// - **Anthropic**：`https://ark.cn-beijing.volces.com/api/plan`（`POST /v1/messages`）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlanProtocol {
+    /// OpenAI 兼容协议（默认）
+    OpenAi,
+    /// Anthropic messages 协议
+    Anthropic,
+}
+
+impl PlanProtocol {
+    /// 从配置解析协议
+    ///
+    /// 优先级：`config.extra["protocol"]` > 环境变量
+    /// `AIBRIDGE_DOUBAO_AGENT_PLAN_PROTOCOL` > 默认 OpenAI。
+    /// 识别值：`anthropic` / `claude` / `anthropic-compatible` 走 Anthropic，
+    /// 其余（含缺省）走 OpenAI。
+    fn resolve(config: &ProviderConfig) -> Self {
+        let explicit = config
+            .extra
+            .get("protocol")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                std::env::var("AIBRIDGE_DOUBAO_AGENT_PLAN_PROTOCOL").ok().filter(|s| !s.is_empty())
+            });
+        match explicit.as_deref() {
+            Some("anthropic") | Some("claude") | Some("anthropic-compatible") => Self::Anthropic,
+            _ => Self::OpenAi,
+        }
+    }
+
+    /// 转为字符串（测试与调试用）
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+        }
+    }
+}
+
+/// 豆包 Agent Plan（火山引擎方舟订阅套餐）适配器
+///
+/// Agent Plan 是火山方舟面向个人的订阅式套餐，使用**专属 Base URL**
+/// （`/api/plan/v3`）与**专属 API Key**（与普通方舟 API Key 不通用，请勿混用）。
+///
+/// ## 双协议上游
+///
+/// 官方同时兼容两种接入协议，本适配器内部组合两个上游实现，按配置分发：
+///
+/// | 协议 | Base URL | 端点 | 上游实现 |
+/// |---|---|---|---|
+/// | OpenAI（默认） | `.../api/plan/v3` | `POST /chat/completions` | [`OpenAiCompatAdapter`] |
+/// | Anthropic | `.../api/plan` | `POST /v1/messages` | [`AnthropicAdapter`] |
+///
+/// 协议选择：`config.extra["protocol"]` > 环境变量 `AIBRIDGE_DOUBAO_AGENT_PLAN_PROTOCOL`
+/// （识别 `anthropic` / `claude` / `anthropic-compatible`）> 默认 OpenAI。
+/// 两种协议对 SDK 使用者暴露完全一致的 `chat` / `chat_stream` 接口，仅上游报文不同。
+///
+/// ## 其他要点
+///
+/// - Models: 套餐数据面**无** `GET /models` 端点（实测 404），list_models 走
+///   硬编码套餐支持模型清单（模式同 [`MiniMaxAdapter`]），与协议选择无关
+/// - 认证: Agent Plan 专属 API Key（`ark-` 开头）；OpenAI 上游走 Bearer，
+///   Anthropic 上游走 `x-api-key`（实测端点两种认证均接受）
+/// - 环境变量: `AIBRIDGE_DOUBAO_AGENT_PLAN_API_KEY` / `..._BASE_URL` / `..._PROTOCOL`
+/// - 支持模型: 见 [`doubao_agent_plan_hardcoded_models`]
+/// - 文档: <https://www.volcengine.com/docs/82379/2366394>
+///
+/// 注意：官方说明套餐文本生成/向量化模型仅限 AI 工具（Claude Code 等）使用，
+/// 在非 AI 工具中直接 API 调用有被判定滥用的风险，请自行评估。
+pub struct DoubaoAgentPlanAdapter {
+    /// OpenAI 协议上游（默认；base_url = `/api/plan/v3`）
+    openai: OpenAiCompatAdapter,
+    /// Anthropic 协议上游（base_url = `/api/plan`，protocol=anthropic 时使用）
+    anthropic: AnthropicAdapter,
+    /// 当前协议（构造时解析，运行期不可变）
+    protocol: PlanProtocol,
+}
+
+impl DoubaoAgentPlanAdapter {
+    /// 创建豆包 Agent Plan 适配器
+    ///
+    /// 同时构造 OpenAI 与 Anthropic 两个上游（构造均为纯配置操作，无网络请求），
+    /// 运行期按 [`PlanProtocol`] 分发。
+    pub fn new(config: ProviderConfig) -> Result<Self> {
+        let protocol = PlanProtocol::resolve(&config);
+        // OpenAI 上游：原始 config（base_url 未设时地基用 /api/plan/v3 默认值）
+        let openai = OpenAiCompatAdapter::new(
+            config.clone(),
+            Self::PROVIDER_TYPE,
+            Self::PROVIDER_NAME,
+            DEFAULT_DOUBAO_AGENT_PLAN_BASE_URL,
+            doubao_capabilities(),
+        )?;
+        // Anthropic 上游：base_url 未显式指定时指向 /api/plan（Anthropic 协议
+        // 不带 /v1 前缀，由 AnthropicAdapter 的 url 拼接自动补全）
+        let mut anth_config = config;
+        if anth_config.base_url.is_none() {
+            anth_config.base_url = Some(DEFAULT_DOUBAO_AGENT_PLAN_ANTHROPIC_BASE_URL.to_string());
+        }
+        let anthropic = AnthropicAdapter::new(anth_config)?;
+        Ok(Self {
+            openai,
+            anthropic,
+            protocol,
+        })
+    }
+
+    /// Provider 类型标识
+    const PROVIDER_TYPE: &'static str = "doubao-agent-plan";
+
+    /// Provider 显示名称
+    const PROVIDER_NAME: &'static str = "豆包 Agent Plan";
+}
+
+#[async_trait]
+impl Adapter for DoubaoAgentPlanAdapter {
+    fn provider_type(&self) -> &str {
+        Self::PROVIDER_TYPE
+    }
+
+    fn provider_name(&self) -> &str {
+        Self::PROVIDER_NAME
+    }
+
+    fn capabilities(&self) -> CapabilitySet {
+        // 两个上游能力等价（chat / chat_stream / vision），取 OpenAI 上游声明
+        self.openai.capabilities_set().clone()
+    }
+
+    fn requires_api_key(&self) -> bool {
+        true
+    }
+
+    async fn start(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    /// 文本对话：按协议分发（OpenAI → `/chat/completions`；Anthropic → `/v1/messages`）
+    async fn chat(&self, req: ChatRequest) -> Result<ChatCompletion> {
+        match self.protocol {
+            PlanProtocol::OpenAi => self.openai.chat(req).await,
+            PlanProtocol::Anthropic => self.anthropic.chat(req).await,
+        }
+    }
+
+    /// 流式文本对话：按协议分发（两种上游均支持 SSE 流式）
+    async fn chat_stream(&self, req: ChatRequest) -> Result<ChatStream> {
+        match self.protocol {
+            PlanProtocol::OpenAi => self.openai.chat_stream(req).await,
+            PlanProtocol::Anthropic => self.anthropic.chat_stream(req).await,
+        }
+    }
+
+    /// 模型列表（硬编码套餐支持模型清单）
+    ///
+    /// Agent Plan 套餐数据面无 `GET /models` 端点（实测 404），按官方文档
+    /// 「支持模型及 Harness」硬编码清单，按 `filter` 过滤模型类型。
+    async fn list_models(&self, filter: Option<ModelType>) -> Result<Vec<ModelInfo>> {
+        let models = doubao_agent_plan_hardcoded_models();
+        Ok(match filter {
+            Some(t) => models.into_iter().filter(|m| m.model_type == t).collect(),
+            None => models,
+        })
+    }
+
+    // image_generate / video_create / video_poll / embed / transcribe / speech / list_voices
+    // 走 trait 默认实现，返 UnsupportedCapability（清单仅展示套餐支持的模型，
+    // 实际调用仍受本适配器能力声明约束）。
+}
+
+/// 豆包 Agent Plan 硬编码模型列表
+///
+/// 对齐官方「套餐概览-支持模型及 Harness」文档（2026-08 更新）：
+/// 13 个文本生成模型 + 1 个图片生成 + 4 个视频生成 + 2 个语音模型。
+/// 向量化模型（doubao-embedding-vision）因 [`ModelType`] 无对应分类暂不列出。
+/// 含即将下线的 glm-5.2 / doubao-seedance-1.5-pro（官方文档仍列于套餐内）。
+fn doubao_agent_plan_hardcoded_models() -> Vec<ModelInfo> {
+    // 文本生成模型（id, 名称, 能力标签, 描述），均支持流式
+    let chat_models = [
+        (
+            "ark-code-latest",
+            "Ark Code Latest",
+            vec!["chat".to_string()],
+            "Agent Plan 编码统一入口模型（Auto 路由）",
+        ),
+        (
+            "doubao-seed-2.0-mini",
+            "Doubao Seed 2.0 Mini",
+            vec!["chat".to_string()],
+            "豆包 Seed 2.0 极速版（256k 上下文）",
+        ),
+        (
+            "doubao-seed-2.0-lite",
+            "Doubao Seed 2.0 Lite",
+            vec!["chat".to_string()],
+            "豆包 Seed 2.0 标准版（256k 上下文）",
+        ),
+        (
+            "deepseek-v4-flash",
+            "DeepSeek V4 Flash",
+            vec!["chat".to_string()],
+            "DeepSeek V4 标准版（1024k 上下文）",
+        ),
+        (
+            "glm-5.3-flash",
+            "GLM 5.3 Flash",
+            vec!["chat".to_string(), "vision".to_string()],
+            "智谱原生多模态模型，支持图片输入（1024k 上下文）",
+        ),
+        (
+            "doubao-seed-2.1-turbo",
+            "Doubao Seed 2.1 Turbo",
+            vec!["chat".to_string()],
+            "豆包 Seed 2.1 进阶版（256k 上下文）",
+        ),
+        (
+            "doubao-seed-evolving",
+            "Doubao Seed Evolving",
+            vec!["chat".to_string()],
+            "豆包快速迭代模型（1024k 上下文）",
+        ),
+        (
+            "minimax-m3",
+            "MiniMax M3",
+            vec!["chat".to_string()],
+            "MiniMax 进阶模型（1024k 上下文）",
+        ),
+        (
+            "glm-5.2",
+            "GLM 5.2",
+            vec!["chat".to_string()],
+            "智谱 GLM 5.2（即将下线，1024k 上下文）",
+        ),
+        (
+            "glm-5.3",
+            "GLM 5.3",
+            vec!["chat".to_string()],
+            "智谱 GLM 5.3（别名 glm-latest，默认开启思考，1024k 上下文）",
+        ),
+        (
+            "kimi-k2.7-code",
+            "Kimi K2.7 Code",
+            vec!["chat".to_string()],
+            "月之暗面代码模型（256k 上下文）",
+        ),
+        (
+            "deepseek-v4-pro",
+            "DeepSeek V4 Pro",
+            vec!["chat".to_string()],
+            "DeepSeek V4 进阶版（1024k 上下文）",
+        ),
+        (
+            "kimi-k3",
+            "Kimi K3",
+            vec!["chat".to_string()],
+            "月之暗面 K3（Small 套餐不支持，1024k 上下文）",
+        ),
+    ];
+    // 图片 / 视频模型（id, 名称, 类型, 描述）
+    let vision_models = [
+        (
+            "doubao-seedream-5.0-lite",
+            "Doubao Seedream 5.0 Lite",
+            ModelType::Image,
+            "豆包图片生成模型",
+        ),
+        (
+            "doubao-seedance-1.5-pro",
+            "Doubao Seedance 1.5 Pro",
+            ModelType::Video,
+            "豆包视频生成模型（即将下线，Medium 及以上套餐支持）",
+        ),
+        (
+            "doubao-seedance-2.0",
+            "Doubao Seedance 2.0",
+            ModelType::Video,
+            "豆包视频生成模型（Large 及以上套餐支持）",
+        ),
+        (
+            "doubao-seedance-2.0-fast",
+            "Doubao Seedance 2.0 Fast",
+            ModelType::Video,
+            "豆包视频生成快速版（Large 及以上套餐支持）",
+        ),
+        (
+            "doubao-seedance-2.0-mini",
+            "Doubao Seedance 2.0 Mini",
+            ModelType::Video,
+            "豆包视频生成轻量版（Large 及以上套餐支持）",
+        ),
+    ];
+    // 语音模型（id, 名称, 能力标签, 描述）
+    let audio_models = [
+        (
+            "doubao-seed-tts-2.0",
+            "Doubao Seed TTS 2.0",
+            vec!["audio_speech".to_string()],
+            "豆包语音合成模型",
+        ),
+        (
+            "doubao-seed-asr-2.0",
+            "Doubao Seed ASR 2.0",
+            vec!["audio_transcribe".to_string()],
+            "豆包语音识别模型",
+        ),
+    ];
+
+    let mut models: Vec<ModelInfo> = Vec::new();
+    for (id, name, caps, desc) in chat_models {
+        models.push(ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            model_type: ModelType::Chat,
+            provider: DoubaoAgentPlanAdapter::PROVIDER_TYPE.to_string(),
+            capabilities: caps,
+            max_tokens: None,
+            supports_streaming: true,
+            description: Some(desc.to_string()),
+            created: None,
+        });
+    }
+    for (id, name, model_type, desc) in vision_models {
+        models.push(ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            model_type,
+            provider: DoubaoAgentPlanAdapter::PROVIDER_TYPE.to_string(),
+            capabilities: Vec::new(),
+            max_tokens: None,
+            supports_streaming: false,
+            description: Some(desc.to_string()),
+            created: None,
+        });
+    }
+    for (id, name, caps, desc) in audio_models {
+        models.push(ModelInfo {
+            id: id.to_string(),
+            name: name.to_string(),
+            model_type: ModelType::Audio,
+            provider: DoubaoAgentPlanAdapter::PROVIDER_TYPE.to_string(),
+            capabilities: caps,
+            max_tokens: None,
+            supports_streaming: false,
+            description: Some(desc.to_string()),
+            created: None,
+        });
+    }
+    models
 }
 
 // ==================== MiniMax 适配器 ====================
@@ -2074,6 +2457,130 @@ mod tests {
             AibridgeError::Api { status, .. } => assert_eq!(status, 500),
             _ => panic!("应为 Api"),
         }
+    }
+
+    // ==================== Doubao Agent Plan 元信息与能力 ====================
+
+    /// 构造 DoubaoAgentPlanAdapter（指向 mockito server，可指定协议 extra）
+    fn make_doubao_agent_plan_with(server: &Server, extra: Option<(&str, &str)>) -> DoubaoAgentPlanAdapter {
+        let mut builder = ClientOptions::builder()
+            .api_key("test-key")
+            .base_url(server.url())
+            .timeout(5);
+        if let Some((k, v)) = extra {
+            builder = builder.extra(k, v);
+        }
+        let config = ProviderConfig::from_options("doubao-agent-plan", builder.build());
+        DoubaoAgentPlanAdapter::new(config).unwrap()
+    }
+
+    /// 构造 DoubaoAgentPlanAdapter（默认 OpenAI 协议，指向 mockito server）
+    fn make_doubao_agent_plan(server: &Server) -> DoubaoAgentPlanAdapter {
+        make_doubao_agent_plan_with(server, None)
+    }
+
+    #[tokio::test]
+    async fn doubao_agent_plan_provider_type_and_name() {
+        let server = Server::new_async().await;
+        let adapter = make_doubao_agent_plan(&server);
+        assert_eq!(adapter.provider_type(), "doubao-agent-plan");
+        assert_eq!(adapter.provider_name(), "豆包 Agent Plan");
+        assert!(adapter.requires_api_key());
+    }
+
+    #[tokio::test]
+    async fn doubao_agent_plan_capabilities_include_chat_and_vision() {
+        let server = Server::new_async().await;
+        let adapter = make_doubao_agent_plan(&server);
+        let caps = adapter.capabilities();
+        assert!(caps.contains(&Capabilities::Chat));
+        assert!(caps.contains(&Capabilities::ChatStream));
+        assert!(caps.contains(&Capabilities::Vision));
+    }
+
+    #[tokio::test]
+    async fn doubao_agent_plan_chat_success() {
+        let mut server = Server::new_async().await;
+        server
+            .mock("POST", "/chat/completions")
+            .with_status(200)
+            .with_body(
+                json!({"id": "1", "object": "chat.completion", "created": 1, "model": "auto",
+                       "choices": [{"index": 0, "finish_reason": "stop",
+                                    "message": {"role": "assistant", "content": "Hello!"}}]})
+                .to_string(),
+            )
+            .create_async()
+            .await;
+        let adapter = make_doubao_agent_plan(&server);
+        let req = ChatRequest::builder("ark-code-latest", vec![ChatMessage::user("hi")]).build();
+        let resp = adapter.chat(req).await.unwrap();
+        assert_eq!(resp.choices[0].message.content.as_deref(), Some("Hello!"));
+    }
+
+    #[tokio::test]
+    async fn doubao_agent_plan_list_models_hardcoded() {
+        let server = Server::new_async().await;
+        let adapter = make_doubao_agent_plan(&server);
+        // 全量：13 chat + 1 image + 4 video + 2 audio = 20
+        let models = adapter.list_models(None).await.unwrap();
+        assert_eq!(models.len(), 20);
+        assert!(models.iter().all(|m| m.provider == "doubao-agent-plan"));
+        let ids: std::collections::HashSet<_> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids.len(), 20, "模型 id 不应重复");
+        assert!(ids.contains("ark-code-latest"));
+        assert!(ids.contains("kimi-k3"));
+        assert!(ids.contains("doubao-seedream-5.0-lite"));
+        assert!(ids.contains("doubao-seedance-2.0"));
+        assert!(ids.contains("doubao-seed-tts-2.0"));
+
+        // 按 Chat 过滤：仅 13 个文本模型
+        let chat = adapter.list_models(Some(ModelType::Chat)).await.unwrap();
+        assert_eq!(chat.len(), 13);
+        assert!(chat.iter().all(|m| m.model_type == ModelType::Chat));
+
+        // 按 Video 过滤：仅 4 个视频模型
+        let video = adapter.list_models(Some(ModelType::Video)).await.unwrap();
+        assert_eq!(video.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn doubao_agent_plan_anthropic_protocol_chat() {
+        let mut server = Server::new_async().await;
+        // protocol=anthropic 时 chat 应走 Anthropic messages 端点（/v1/messages，
+        // base_url 自动补 /v1），认证 header 为 x-api-key + anthropic-version
+        server
+            .mock("POST", "/v1/messages")
+            .match_header("x-api-key", "test-key")
+            .match_header("anthropic-version", ANTHROPIC_API_VERSION)
+            .with_status(200)
+            .with_body(
+                json!({"id": "msg_1", "type": "message", "role": "assistant", "model": "auto",
+                       "content": [{"type": "text", "text": "Hello!"}],
+                       "stop_reason": "end_turn",
+                       "usage": {"input_tokens": 5, "output_tokens": 2}})
+                .to_string(),
+            )
+            .create_async()
+            .await;
+        let adapter = make_doubao_agent_plan_with(&server, Some(("protocol", "anthropic")));
+        let req = ChatRequest::builder("ark-code-latest", vec![ChatMessage::user("hi")]).build();
+        let resp = adapter.chat(req).await.unwrap();
+        assert_eq!(resp.choices[0].message.content.as_deref(), Some("Hello!"));
+    }
+
+    #[tokio::test]
+    async fn doubao_agent_plan_protocol_resolution() {
+        let server = Server::new_async().await;
+        // 缺省（无 extra / 无环境变量）→ OpenAI 协议
+        let adapter = make_doubao_agent_plan(&server);
+        assert_eq!(adapter.protocol.as_str(), "openai");
+        // extra["protocol"]=claude → Anthropic 协议（别名识别）
+        let adapter = make_doubao_agent_plan_with(&server, Some(("protocol", "claude")));
+        assert_eq!(adapter.protocol.as_str(), "anthropic");
+        // 未知值回退 OpenAI
+        let adapter = make_doubao_agent_plan_with(&server, Some(("protocol", "unknown")));
+        assert_eq!(adapter.protocol.as_str(), "openai");
     }
 
     // ==================== Kimi 元信息与能力 ====================

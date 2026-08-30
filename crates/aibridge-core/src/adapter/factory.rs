@@ -20,7 +20,8 @@ use crate::adapters::assemblyai::AssemblyAiAdapter;
 use crate::adapters::azure::AzureAdapter;
 use crate::adapters::cartesia::CartesiaAdapter;
 use crate::adapters::chinese::{
-    DoubaoAdapter, ErnieAdapter, KimiAdapter, MiniMaxAdapter, QwenAdapter, ZhipuAdapter,
+    DoubaoAdapter, DoubaoAgentPlanAdapter, ErnieAdapter, KimiAdapter, MiniMaxAdapter, QwenAdapter,
+    ZhipuAdapter,
 };
 use crate::adapters::deepgram::DeepgramAdapter;
 use crate::adapters::echo::EchoAdapter;
@@ -74,6 +75,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "qwen",
     "zhipu",
     "doubao",
+    "doubao-agent-plan",
     "ernie",
     "kimi",
     "minimax",
@@ -138,6 +140,10 @@ pub fn create_adapter(config: ProviderConfig) -> Result<Box<dyn Adapter>> {
         "qwen" => Ok(Box::new(QwenAdapter::new(config)?)),
         "zhipu" => Ok(Box::new(ZhipuAdapter::new(config)?)),
         "doubao" => Ok(Box::new(DoubaoAdapter::new(config)?)),
+        // 豆包 Agent Plan（火山方舟订阅套餐，专属 Base URL + 专属 API Key）
+        "doubao-agent-plan" | "doubao_agent_plan" => {
+            Ok(Box::new(DoubaoAgentPlanAdapter::new(config)?))
+        }
         "ernie" => Ok(Box::new(ErnieAdapter::new(config)?)),
         "kimi" => Ok(Box::new(KimiAdapter::new(config)?)),
         "minimax" => Ok(Box::new(MiniMaxAdapter::new(config)?)),

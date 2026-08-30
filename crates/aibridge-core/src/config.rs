@@ -78,12 +78,20 @@ impl ClientOptions {
     ///
     /// 读取顺序：`AIBRIDGE_{PROVIDER}_*` > `AGN_{PROVIDER}_*` > 通用 `AIBRIDGE_API_KEY` / `AGN_API_KEY`。
     /// `provider` 用于构造 provider 专属环境变量名（大写）。
+    ///
+    /// 连字符兼容：provider 名含连字符时（如 `doubao-agent-plan`、`edge-tts`），
+    /// 同时尝试下划线变体（`AIBRIDGE_DOUBAO_AGENT_PLAN_API_KEY`，shell 可直接
+    /// export，优先）与连字符变体（仅进程内注入可用），向后兼容旧用法。
     pub fn merge_env(mut self, provider: &str) -> Self {
         let upper = provider.to_uppercase();
+        // 下划线变体：连字符替换为下划线（shell 友好，优先读取）
+        let upper_us = upper.replace('-', "_");
 
-        // api_key：provider 专属优先，再回退到通用
+        // api_key：provider 专属优先（下划线 > 连字符变体），再回退到通用
         if self.api_key.is_none() {
-            self.api_key = env_var(&format!("AIBRIDGE_{upper}_API_KEY"))
+            self.api_key = env_var(&format!("AIBRIDGE_{upper_us}_API_KEY"))
+                .or_else(|| env_var(&format!("AIBRIDGE_{upper}_API_KEY")))
+                .or_else(|| env_var(&format!("AGN_{upper_us}_API_KEY")))
                 .or_else(|| env_var(&format!("AGN_{upper}_API_KEY")))
                 .or_else(|| env_var("AIBRIDGE_API_KEY"))
                 .or_else(|| env_var("AGN_API_KEY"));
@@ -91,7 +99,9 @@ impl ClientOptions {
 
         // base_url
         if self.base_url.is_none() {
-            self.base_url = env_var(&format!("AIBRIDGE_{upper}_BASE_URL"))
+            self.base_url = env_var(&format!("AIBRIDGE_{upper_us}_BASE_URL"))
+                .or_else(|| env_var(&format!("AIBRIDGE_{upper}_BASE_URL")))
+                .or_else(|| env_var(&format!("AGN_{upper_us}_BASE_URL")))
                 .or_else(|| env_var(&format!("AGN_{upper}_BASE_URL")))
                 .or_else(|| env_var("AIBRIDGE_BASE_URL"))
                 .or_else(|| env_var("AGN_BASE_URL"));
@@ -99,7 +109,9 @@ impl ClientOptions {
 
         // poll_url（视频轮询地址，仅部分 Provider 用）
         if self.poll_url.is_none() {
-            self.poll_url = env_var(&format!("AIBRIDGE_{upper}_POLL_URL"))
+            self.poll_url = env_var(&format!("AIBRIDGE_{upper_us}_POLL_URL"))
+                .or_else(|| env_var(&format!("AIBRIDGE_{upper}_POLL_URL")))
+                .or_else(|| env_var(&format!("AGN_{upper_us}_POLL_URL")))
                 .or_else(|| env_var(&format!("AGN_{upper}_POLL_URL")));
         }
 
@@ -404,6 +416,30 @@ mod tests {
         let opts = ClientOptions::default().merge_env("empty");
         assert!(opts.api_key.is_none());
         env::remove_var("AIBRIDGE_EMPTY_API_KEY");
+    }
+
+    #[test]
+    fn merge_env_hyphenated_provider_uses_underscore_variant() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        // 连字符 provider（如 doubao-agent-plan）：下划线环境变量（shell 可 export）优先
+        env::set_var("AIBRIDGE_HYPHEN_TEST_API_KEY", "underscore-key");
+        let opts = ClientOptions::default().merge_env("hyphen-test");
+        assert_eq!(opts.api_key.as_deref(), Some("underscore-key"));
+        env::remove_var("AIBRIDGE_HYPHEN_TEST_API_KEY");
+
+        // 进程内注入的连字符变体仍兼容（向后兼容旧用法）
+        env::set_var("AIBRIDGE_HYPHEN-TEST2_API_KEY", "hyphen-key");
+        let opts = ClientOptions::default().merge_env("hyphen-test2");
+        assert_eq!(opts.api_key.as_deref(), Some("hyphen-key"));
+        env::remove_var("AIBRIDGE_HYPHEN-TEST2_API_KEY");
+
+        // 下划线与连字符变体同时存在时，下划线优先
+        env::set_var("AIBRIDGE_HYPHEN_TEST3_API_KEY", "underscore-first");
+        env::set_var("AIBRIDGE_HYPHEN-TEST3_API_KEY", "hyphen-second");
+        let opts = ClientOptions::default().merge_env("hyphen-test3");
+        assert_eq!(opts.api_key.as_deref(), Some("underscore-first"));
+        env::remove_var("AIBRIDGE_HYPHEN_TEST3_API_KEY");
+        env::remove_var("AIBRIDGE_HYPHEN-TEST3_API_KEY");
     }
 
     #[test]
