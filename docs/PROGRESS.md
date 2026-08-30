@@ -118,7 +118,7 @@ aibridge/
 - [x] v2 README（[README.md](index.md)）
 - [x] 进度文档更新（本文档）
 - [x] CI 矩阵（ci.yml：4 平台 × 6 语言 job，2026-08-30 验证 workflow 就绪）
-- [x] 五语言包发布 workflow（publish-python.yml + publish-bindings.yml：Node npm / JVM jar / .NET NuGet / Go 动态库 Release；实际发布需配置 NPM_TOKEN / NUGET_API_KEY 等 secrets）
+- [x] 五语言包发布 workflow（publish-python.yml + publish-bindings.yml：Node npm / JVM jar / .NET NuGet / Go 动态库 Release；实际发布需配置 NPM_TOKEN，NuGet 走信任发布无需 secret）
 - [x] 文档网站（mkdocs-material + en i18n，2026-08-30 本地 build 验证通过，部署由 docs.yml 自动执行）
 - [x] 旧版 v1 归档 + 打 v2.0.0 tag（2026-08-30：v1 代码/测试/文档已从仓库移除，git tag `v1.3.3` 可找回）
 - [x] .NET hello world 验证（2026-08-30 本地 dotnet 10.0.302 实测通过：chat/stream/speech 三项断言全 True）

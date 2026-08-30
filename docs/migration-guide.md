@@ -768,4 +768,4 @@ A：会。v2 正式发版后，v1 仓库归档保留，PyPI 上的 `agn-sdk` 不
 - [设计文档](design.md)：架构、数据模型、FFI 边界、错误处理
 - [进度文档](PROGRESS.md)：当前实施进度与接手指南
 - [README（v2）](index.md)：五语言快速开始 + provider 列表
-- [原 README（v1）](https://github.com/WingkySky/AGN-SDK/blob/v1.3.3/README_v1.md)：Python v1 文档（git tag `v1.3.3` 归档参考）
+- [原 README（v1）](https://github.com/WingkySky/AiBridge/blob/v1.3.3/README_v1.md)：Python v1 文档（git tag `v1.3.3` 归档参考）

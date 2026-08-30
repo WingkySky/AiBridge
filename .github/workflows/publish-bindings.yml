@@ -12,9 +12,10 @@
 # - Go module 无中央仓库：go get 通过 git tag 拉取源码，go-release job 负责
 #   把各平台 libaibridge 动态库作为 Release 附件发布（配合安装脚本使用）
 #
-# 发布凭据（Secrets，可选）：
+# 发布凭据（Secrets）：
 # - NPM_TOKEN：npm `aibridge` 包（crates/aibridge-node）
-# - NUGET_API_KEY：NuGet `AIBridge` 包（bindings/dotnet）
+# - NuGet 无需 secret：走信任发布（nuget.org Trusted Publishing，OIDC），
+#   政策需匹配仓库身份 WingkySky/AiBridge + workflow publish-bindings.yml
 
 name: Publish Bindings
 
@@ -227,10 +228,21 @@ jobs:
     name: .NET 组包与发布
     needs: dotnet-build
     runs-on: ubuntu-latest
-    env:
-      HAS_NUGET_KEY: ${{ secrets.NUGET_API_KEY != '' }}
+    # NuGet 信任发布（Trusted Publishing，OIDC）：无长期 API key，
+    # 推包时 GitHub 出示仓库身份，NuGet 与 nuget.org 预配置的政策比对放行。
+    # 需要仓库身份匹配：Repository Owner=WingkySky / Repository=AiBridge / Workflow=publish-bindings.yml
+    permissions:
+      id-token: write   # OIDC 令牌（信任发布必需）
+      contents: read
     steps:
       - uses: actions/checkout@v4
+      - name: NuGet 登录（OIDC 信任发布，换发临时 API key）
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: nuget/login@v1
+        id: nuget-login
+        with:
+          # nuget.org 的 Package owner（账号名，见 Trusted Publishing 页 Package owner 字段）
+          user-oidc: wingkysky
       - name: 安装 .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -270,14 +282,13 @@ jobs:
           name: nuget-package
           path: bindings/dotnet/AIBridge/bin/Release/*.nupkg
           if-no-files-found: error
-      - name: NuGet push
+      - name: NuGet push（OIDC 临时 key，无需 secrets）
         if: >-
           startsWith(github.ref, 'refs/tags/v') &&
-          (github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false') &&
-          env.HAS_NUGET_KEY == 'true'
+          (github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false')
         run: |
           dotnet nuget push "bindings/dotnet/AIBridge/bin/Release/*.nupkg" \
-            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --api-key "${{ steps.nuget-login.outputs.apikey }}" \
             --source https://api.nuget.org/v3/index.json \
             --skip-duplicate
 
