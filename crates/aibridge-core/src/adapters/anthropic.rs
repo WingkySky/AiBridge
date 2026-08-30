@@ -157,11 +157,20 @@ impl AnthropicAdapter {
         self.compat.base_url()
     }
 
-    /// 拼接完整 URL（base_url + 相对路径）
+    /// 拼接完整 URL（base_url + 相对路径，自动兼容带/不带 `/v1` 的 base_url 写法）
+    ///
+    /// Anthropic 官方生态约定 base_url 不含 `/v1`（官方 SDK 与火山 Agent Plan 等
+    /// 兼容端点文档均按此写法，由客户端自行拼接 `/v1/messages`）；本适配器沿用
+    /// v1 归入 base_url 的历史约定，只拼相对路径。此处做兼容：base_url 以 `/v1`
+    /// 结尾时直接拼路径，否则自动补 `v1` 前缀，两种写法最终指向同一端点。
     fn url(&self, path: &str) -> String {
         let base = self.base_url().trim_end_matches('/');
         let path = path.trim_start_matches('/');
-        format!("{base}/{path}")
+        if base.ends_with("/v1") {
+            format!("{base}/{path}")
+        } else {
+            format!("{base}/v1/{path}")
+        }
     }
 
     /// 校验能力是否被支持
@@ -1059,16 +1068,21 @@ mod tests {
 
     // ==================== 通用测试辅助 ====================
 
-    /// 构造测试用 AnthropicAdapter（指向 mockito server）
+    /// 构造测试用 AnthropicAdapter（指向 mockito server，base_url 带 `/v1`，对齐默认配置形态）
     fn make_anthropic(server: &Server) -> AnthropicAdapter {
+        make_anthropic_with_base(&format!("{}/v1", server.url()))
+    }
+
+    /// 构造指定 base_url 的测试用 AnthropicAdapter（用于验证不同 base_url 写法的拼接兼容）
+    fn make_anthropic_with_base(base_url: &str) -> AnthropicAdapter {
         let opts = ClientOptions::builder()
             .api_key("test-key")
-            .base_url(server.url())
+            .base_url(base_url)
             .timeout(5)
             .build();
         let config = ProviderConfig::from_options("anthropic", opts);
         let http =
-            HttpClient::new(&ClientOptions::builder().base_url(server.url()).build()).unwrap();
+            HttpClient::new(&ClientOptions::builder().base_url(base_url).build()).unwrap();
         let compat = OpenAiCompatAdapter::with_http(
             http,
             config,
@@ -1137,13 +1151,71 @@ mod tests {
         assert_eq!(ANTHROPIC_API_VERSION, "2023-06-01");
     }
 
+    // ==================== base_url 版本前缀兼容测试 ====================
+
+    /// base_url 带 `/v1` 时直接拼相对路径（历史约定，行为不变）
+    #[tokio::test]
+    async fn url_appends_path_when_base_url_ends_with_v1() {
+        let adapter = make_anthropic_with_base("https://api.anthropic.com/v1");
+        assert_eq!(
+            adapter.url("messages"),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(adapter.url("models"), "https://api.anthropic.com/v1/models");
+    }
+
+    /// base_url 带尾斜杠 + `/v1` 时同样直接拼（trim 后判断）
+    #[tokio::test]
+    async fn url_trims_trailing_slash_before_v1_check() {
+        let adapter = make_anthropic_with_base("https://proxy.example.com/v1/");
+        assert_eq!(
+            adapter.url("messages"),
+            "https://proxy.example.com/v1/messages"
+        );
+    }
+
+    /// base_url 不带 `/v1`（官方生态写法，如火山 Agent Plan 文档）时自动补 v1 前缀
+    #[tokio::test]
+    async fn url_auto_prefixes_v1_when_base_url_has_no_v1() {
+        let adapter = make_anthropic_with_base("https://ark.cn-beijing.volces.com/api/plan");
+        assert_eq!(
+            adapter.url("messages"),
+            "https://ark.cn-beijing.volces.com/api/plan/v1/messages"
+        );
+        assert_eq!(
+            adapter.url("models"),
+            "https://ark.cn-beijing.volces.com/api/plan/v1/models"
+        );
+    }
+
+    /// 端到端：base_url 不带 `/v1` 的适配器请求应命中 mock 的 `/v1/messages`
+    #[tokio::test]
+    async fn chat_hits_v1_messages_when_base_url_has_no_v1() {
+        let mut server = Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/messages")
+            .match_header("x-api-key", "test-key")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(anthropic_chat_body().to_string())
+            .create_async()
+            .await;
+        let adapter = make_anthropic_with_base(&server.url());
+
+        let req = ChatRequest::builder("claude-3-5-sonnet-20241022", vec![ChatMessage::user("hi")])
+            .build();
+        let resp = adapter.chat(req).await.unwrap();
+        assert_eq!(resp.choices[0].message.content.as_deref(), Some("Hello!"));
+        mock.assert_async().await;
+    }
+
     // ==================== chat 正常路径 ====================
 
     #[tokio::test]
     async fn chat_success_parses_completion() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_header("x-api-key", "test-key")
             .match_header("anthropic-version", "2023-06-01")
             .with_status(200)
@@ -1176,7 +1248,7 @@ mod tests {
         // 验证 Anthropic 特有认证 header（x-api-key + anthropic-version），非 Bearer
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_header("x-api-key", "test-key")
             .match_header("anthropic-version", "2023-06-01")
             .match_header("authorization", mockito::Matcher::Missing)
@@ -1198,7 +1270,7 @@ mod tests {
         // system 消息应提取到顶层 system 字段，不在 messages 中
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "model": "claude-3-5-sonnet-20241022",
                 "system": "you are helpful",
@@ -1229,7 +1301,7 @@ mod tests {
         // 多轮对话：user/assistant 消息转为 Anthropic messages（system 提取到顶层）
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "messages": [
                     {"role": "user", "content": "first question"},
@@ -1262,7 +1334,7 @@ mod tests {
         // max_tokens 必填，未指定时兜底 1024
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "max_tokens": 1024
             })))
@@ -1283,7 +1355,7 @@ mod tests {
         // stop → stop_sequences（统一为数组）
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "stop_sequences": ["END", "STOP"]
             })))
@@ -1305,7 +1377,7 @@ mod tests {
     async fn chat_passes_temperature_top_p_top_k() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "temperature": 0.7,
                 "top_p": 0.9,
@@ -1332,7 +1404,7 @@ mod tests {
         // extra 透传到顶层
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "custom_param": "custom_value"
             })))
@@ -1356,7 +1428,7 @@ mod tests {
         // Anthropic 协议不接受 reasoning_effort 字段，仅注入 thinking
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "thinking": {"type": "enabled", "budget_tokens": 16384},
                 "max_tokens": 20000
@@ -1379,7 +1451,7 @@ mod tests {
     async fn chat_no_thinking_without_reasoning_effort() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "model": "claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "hi"}]
@@ -1412,7 +1484,7 @@ mod tests {
             "usage": {"input_tokens": 5, "output_tokens": 2}
         });
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(200)
             .with_body(body.to_string())
             .create_async()
@@ -1447,7 +1519,7 @@ mod tests {
                 "usage": {"input_tokens": 1, "output_tokens": 1}
             });
             server
-                .mock("POST", "/messages")
+                .mock("POST", "/v1/messages")
                 .with_status(200)
                 .with_body(body.to_string())
                 .create_async()
@@ -1472,7 +1544,7 @@ mod tests {
     async fn chat_error_401_returns_authentication() {
         let mut server = Server::new_async().await;
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(401)
             .with_body(
                 json!({
@@ -1496,7 +1568,7 @@ mod tests {
     async fn chat_error_429_returns_rate_limit() {
         let mut server = Server::new_async().await;
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(429)
             .with_body(
                 json!({
@@ -1520,7 +1592,7 @@ mod tests {
     async fn chat_error_404_returns_model_not_found() {
         let mut server = Server::new_async().await;
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(404)
             .with_body(
                 json!({
@@ -1544,7 +1616,7 @@ mod tests {
     async fn chat_error_400_returns_validation() {
         let mut server = Server::new_async().await;
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(400)
             .with_body(
                 json!({
@@ -1573,7 +1645,7 @@ mod tests {
     async fn chat_error_500_returns_api() {
         let mut server = Server::new_async().await;
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(500)
             .with_body(
                 json!({
@@ -1639,7 +1711,7 @@ mod tests {
                    event: message_stop\n\
                    data: {\"type\":\"message_stop\"}\n\n";
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(200)
             .with_header("content-type", "text/event-stream")
             .with_body(sse)
@@ -1681,7 +1753,7 @@ mod tests {
                    event: message_stop\n\
                    data: {\"type\":\"message_stop\"}\n\n";
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(200)
             .with_body(sse)
             .create_async()
@@ -1705,7 +1777,7 @@ mod tests {
     async fn chat_stream_sends_stream_true_and_headers() {
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_header("x-api-key", "test-key")
             .match_header("anthropic-version", "2023-06-01")
             .match_body(mockito::Matcher::PartialJson(json!({
@@ -1730,7 +1802,7 @@ mod tests {
     async fn chat_stream_error_401_returns_authentication() {
         let mut server = Server::new_async().await;
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(401)
             .with_body(
                 json!({"type":"error","error":{"type":"authentication_error","message":"bad key"}})
@@ -1754,7 +1826,7 @@ mod tests {
     async fn chat_stream_error_429_returns_rate_limit() {
         let mut server = Server::new_async().await;
         server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .with_status(429)
             .with_body(
                 json!({"type":"error","error":{"type":"rate_limit_error","message":"slow down"}})
@@ -1786,7 +1858,7 @@ mod tests {
             ]
         });
         server
-            .mock("GET", "/models")
+            .mock("GET", "/v1/models")
             .match_header("x-api-key", "test-key")
             .match_header("anthropic-version", "2023-06-01")
             .with_status(200)
@@ -1807,7 +1879,7 @@ mod tests {
     async fn list_models_error_401() {
         let mut server = Server::new_async().await;
         server
-            .mock("GET", "/models")
+            .mock("GET", "/v1/models")
             .with_status(401)
             .with_body(
                 json!({"type":"error","error":{"type":"authentication_error","message":"bad key"}})
@@ -2193,7 +2265,7 @@ mod tests {
         // 端到端：请求体 tools/tool_choice 为 Anthropic 原生格式，响应 tool_use 正确解析
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "tools": [{
                     "name": "get_weather",
@@ -2249,7 +2321,7 @@ mod tests {
         // 完整工具对话回路：assistant(tool_use) + tool 结果回传 → Anthropic 消息格式
         let mut server = Server::new_async().await;
         let mock = server
-            .mock("POST", "/messages")
+            .mock("POST", "/v1/messages")
             .match_body(mockito::Matcher::PartialJson(json!({
                 "messages": [
                     {"role": "user", "content": "北京天气?"},

@@ -401,7 +401,7 @@ Errors carry a stable `code` (snake_case, e.g. `rate_limit_error`) and a `retrya
 - [Design](design.md) - architecture, data models, FFI boundary, async bridging, error handling, adapter migration strategy
 - [Migration Guide](migration-guide.md) - breaking-change comparison and examples for Python v1 (agn-sdk) -> v2 (aibridge)
 - [Progress](PROGRESS.md) - current implementation progress and handoff guide
-- [Original README (v1)](https://github.com/WingkySky/AiBridge/blob/main/README_v1.md) - Python v1 docs (archived for reference)
+- [Original README (v1)](https://github.com/WingkySky/AiBridge/blob/v1.3.3/README_v1.md) - Python v1 docs (git tag `v1.3.3` archived reference; removed from the repository after full migration to v2)
 
 ---
 

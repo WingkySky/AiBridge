@@ -17,10 +17,8 @@ docs_dir: docs
 site_dir: site
 
 # 排除不纳入网站的文档：
-#   - 0[1-5]-*.md：Python v1 旧文档（归档参考，与 v2 无关）
 #   - superpowers/：原始 spec/plan（已复制为 docs/design.md 与 docs/plan.md，原文件保留在 git）
 exclude_docs: |
-  0[1-5]-*.md
   superpowers/
 
 theme:

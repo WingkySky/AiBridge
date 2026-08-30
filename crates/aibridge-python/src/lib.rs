@@ -40,7 +40,7 @@ use aibridge_core::model::audio::{
 };
 use aibridge_core::model::chat::{
     ChatCompletion as CoreChatCompletion, ChatCompletionChunk as CoreChatCompletionChunk,
-    ChatMessage as CoreChatMessage, ChatRequest as CoreChatRequest,
+    ChatMessage as CoreChatMessage, ChatRequest as CoreChatRequest, ChatUsage as CoreChatUsage,
 };
 use aibridge_core::model::common::{
     ModelInfo as CoreModelInfo, ModelType as CoreModelType, TaskStatus as CoreTaskStatus,
@@ -486,6 +486,51 @@ impl ChoiceMessage {
     }
 }
 
+/// Token 使用统计（流式末尾统计块 / 非流式响应携带）
+#[pyclass(skip_from_py_object)]
+#[derive(Debug, Clone)]
+struct ChatUsage {
+    prompt_tokens: u64,
+    completion_tokens: u64,
+    total_tokens: u64,
+}
+
+#[pymethods]
+impl ChatUsage {
+    #[getter]
+    fn prompt_tokens(&self) -> u64 {
+        self.prompt_tokens
+    }
+
+    #[getter]
+    fn completion_tokens(&self) -> u64 {
+        self.completion_tokens
+    }
+
+    #[getter]
+    fn total_tokens(&self) -> u64 {
+        self.total_tokens
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ChatUsage(prompt_tokens={}, completion_tokens={}, total_tokens={})",
+            self.prompt_tokens, self.completion_tokens, self.total_tokens
+        )
+    }
+}
+
+impl ChatUsage {
+    /// 从 core 的 `ChatUsage` 转换
+    fn from_core(u: CoreChatUsage) -> Self {
+        Self {
+            prompt_tokens: u.prompt_tokens,
+            completion_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+        }
+    }
+}
+
 /// 流式对话块
 #[pyclass(skip_from_py_object)]
 #[derive(Debug, Clone)]
@@ -493,6 +538,7 @@ struct ChatCompletionChunk {
     id: String,
     model: String,
     choices: Vec<ChatChunkDelta>,
+    usage: Option<ChatUsage>,
 }
 
 #[pymethods]
@@ -512,10 +558,22 @@ impl ChatCompletionChunk {
         self.choices.clone()
     }
 
+    /// Token 使用统计（仅末尾统计块携带，其余块为 None）
+    #[getter]
+    fn usage(&self) -> Option<ChatUsage> {
+        self.usage.clone()
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "ChatCompletionChunk(id={:?}, model={:?})",
-            self.id, self.model
+            "ChatCompletionChunk(id={:?}, model={:?}, choices={}, usage={})",
+            self.id,
+            self.model,
+            self.choices.len(),
+            self.usage
+                .as_ref()
+                .map(|u| u.__repr__())
+                .unwrap_or_else(|| "None".to_string())
         )
     }
 }
@@ -535,6 +593,7 @@ impl ChatCompletionChunk {
                     finish_reason: d.finish_reason.unwrap_or_default(),
                 })
                 .collect(),
+            usage: c.usage.map(ChatUsage::from_core),
         }
     }
 }
@@ -2806,6 +2865,7 @@ fn _aibridge(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ChatCompletion>()?;
     m.add_class::<ChatChoice>()?;
     m.add_class::<ChoiceMessage>()?;
+    m.add_class::<ChatUsage>()?;
     m.add_class::<ChatCompletionChunk>()?;
     m.add_class::<ChatChunkDelta>()?;
     m.add_class::<SpeechResult>()?;

@@ -407,7 +407,7 @@ cd crates/aibridge-node && npm install && napi build
 - [设计文档](docs/superpowers/specs/2026-07-07-aibridge-rust-rewrite-design.md) - 架构、数据模型、FFI 边界、异步桥接、错误处理、适配器迁移策略
 - [迁移指南](docs/migration-guide.md) - Python v1（agn-sdk）-> v2（aibridge）破坏性升级对照与示例
 - [进度文档](docs/PROGRESS.md) - 当前实施进度与接手指南
-- [原 README（v1）](README_v1.md) - Python v1 文档（归档参考）
+- [原 README（v1）](https://github.com/WingkySky/AGN-SDK/blob/v1.3.3/README_v1.md) - Python v1 文档（见 git tag `v1.3.3`；v1 已全量迁移至 v2，旧文件已从仓库移除）
 
 ---
 

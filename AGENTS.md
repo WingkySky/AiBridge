@@ -2,7 +2,7 @@
 
 > 本文件是 Agent 执行任务时必须首先加载的项目指南。
 > v2.0.0 已合并至 `main`：项目当前主线是 **AIBridge**（Rust 核心 + 五语言原生绑定）。
-> Python v1（`agn-sdk`）已归档，仅作历史参考。
+> Python v1（`agn-sdk`）已归档并从仓库移除（完整代码见 git tag `v1.3.3`）。
 
 ---
 
@@ -11,7 +11,7 @@
 - **当前主线**：AIBridge v2 - 跨语言 AI 统一接口 SDK（Rust 核心 + Python / JS-TS / Go / JVM / .NET 五语言原生绑定）
 - **版本**：`2.0.0-alpha.1`（见 `Cargo.toml`），阶段 3 发布收尾中
 - **能力**：chat（含流式）/ image / video / TTS / ASR / embed，38 个真实 provider + 1 个 mock（echo）
-- **v1 状态**：Python v1（`agn-sdk`）已归档，不再迭代。老用户参考 [README_v1.md](README_v1.md) 与 [迁移指南](docs/migration-guide.md)
+- **v1 状态**：Python v1（`agn-sdk`）已全量迁移至 v2，旧代码已于 2026-08-30 从仓库移除（git tag `v1.3.3` 可随时找回）。老用户参考 [迁移指南](docs/migration-guide.md)
 
 ---
 
@@ -28,7 +28,7 @@
 | ★ | README | [README.md](README.md) | 五语言快速开始 + provider 列表（面向用户） |
 
 > 文档网站（mkdocs-material）构建自 `docs/`，配置见 `mkdocs.yml`。
-> `docs/0[1-5]-*.md` 是 Python v1 旧文档，已通过 `exclude_docs` 排除出网站，仅在 git 中保留作归档。
+> `docs/superpowers/` 是原始 spec/plan 归档（已复制为 `docs/design.md` 与 `docs/plan.md`），通过 `exclude_docs` 排除出网站。
 
 ---
 
@@ -46,14 +46,12 @@ agn-sdk/
 │   ├── jvm/                # JNA 调 ffi（Java/Kotlin）
 │   └── dotnet/             # P/Invoke 调 ffi（C#）
 ├── docs/                   # 设计文档 + 计划 + 迁移指南 + 进度文档（mkdocs 网站）
-├── examples/               # 五语言 hello world（echo adapter）+ v1 Python 示例（归档）
-├── agn/                    # Python v1 旧代码（归档，勿在此改 v2 逻辑）
-├── tests/                  # v1 Python 测试（归档）
+├── examples/               # 五语言 hello world（echo adapter）+ 真实 provider 冒烟脚本
+├── tests/                  # v2 测试：Python 绑定 e2e + 跨语言一致性探针（tests/consistency/）
 ├── Cargo.toml              # Rust workspace 根
-├── pyproject.toml          # v1 Python 包配置（归档）
+├── pytest.ini              # Python 绑定测试配置
 ├── mkdocs.yml              # 文档网站配置
 ├── README.md               # v2 项目说明（面向用户）
-├── README_v1.md            # v1 Python 项目说明（归档）
 └── AGENTS.md               # 本文件
 ```
 
@@ -95,18 +93,14 @@ cd bindings/dotnet && dotnet run
 
 ---
 
-## 5. v1 归档说明（勿改 v2 逻辑时误入）
+## 5. v1 归档说明
 
-以下内容属于 Python v1，仅作历史参考，**不要在其上做 v2 改动**：
+Python v1（`agn-sdk`）已全量迁移至 v2（38 provider + 六大能力零丢失），相关旧文件已于 2026-08-30 从仓库移除：
 
-- `agn/` - v1 Python SDK 核心代码
-- `tests/` - v1 Python 测试
-- `pyproject.toml` - v1 Python 包配置（`agn-sdk` PyPI 包）
-- `examples/*.py`（非 `hello_*`）- v1 Python 示例
-- `docs/01-overview.md` ~ `docs/05-project-structure.md` - v1 设计文档
-- `README_v1.md` - v1 项目说明
-
-v1 -> v2 迁移对照见 [docs/migration-guide.md](docs/migration-guide.md)。
+- **已移除**：`agn/`（v1 包）、v1 pytest 测试（`tests/test_adapters/` 等）、v1 示例（`examples/basic_usage.py` 等 3 个）、根 `pyproject.toml`（v1 flit 打包配置）、`uv.lock`、`README_v1.md`、`docs/01~05`（v1 旧文档）
+- **找回方式**：`git checkout v1.3.3`（tag 完整保留 v1 代码）
+- **PyPI**：已发布的 `agn-sdk` 包不受影响（与仓库无关）
+- v1 -> v2 迁移对照见 [docs/migration-guide.md](docs/migration-guide.md)
 
 ---
 
@@ -127,8 +121,8 @@ v1 -> v2 迁移对照见 [docs/migration-guide.md](docs/migration-guide.md)。
 2. 按任务类型读对应文档（改架构读设计文档；迁移 provider 读迁移指南 + 现有适配器）
 3. 用 `echo` 适配器（免认证、不调网络）本地验证管线
 4. 改完跑 `cargo test -p aibridge-core` + 对应绑定构建
-5. 提交前确认未误改 v1 归档代码
+5. 提交前跑 `git status` 确认没有无关文件变动
 
 ---
 
-**最后提醒**：本项目已全面转向 v2（Rust）。除非任务明确要求改 v1，否则所有改动都应在 `crates/` 与 `bindings/` 下进行。
+**最后提醒**：本项目主线是 v2（Rust）。所有功能改动都应在 `crates/` 与 `bindings/` 下进行。

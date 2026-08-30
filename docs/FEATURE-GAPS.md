@@ -1,7 +1,7 @@
 # AiBridge v2 功能差距与下一步开发计划
 
 > 生成日期：2026-07-18
-> 对比基准：旧版 Python agn-sdk (`agn/` 目录) vs 新版 Rust AiBridge (`crates/aibridge-core/`)
+> 对比基准：旧版 Python agn-sdk (`agn/` 目录，已于 2026-08-30 从仓库移除，git tag `v1.3.3` 可找回) vs 新版 Rust AiBridge (`crates/aibridge-core/`)
 > 当前状态：阶段 0-2 完成（38 个真实 provider + echo mock，五语言绑定管线打通）
 > 测试：aibridge-core 1449 单测 + aibridge-ffi 39 单测全通过
 

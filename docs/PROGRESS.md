@@ -120,7 +120,7 @@ aibridge/
 - [ ] CI 矩阵（平台 × 语言，交叉编译）
 - [ ] 五语言包发布（PyPI `aibridge` / npm `aibridge` / Maven `io.aibridge:aibridge` / NuGet `AIBridge` / Go module `aibridge-go`）
 - [ ] 文档网站
-- [ ] 旧版 v1 归档 + 打 v2.0.0 tag
+- [x] 旧版 v1 归档 + 打 v2.0.0 tag（2026-08-30：v1 代码/测试/文档已从仓库移除，git tag `v1.3.3` 可找回）
 - [ ] .NET hello world 验证（待 dotnet sdk）
 - [ ] 一致性测试纳入 CI（当前手动跑）
 - [ ] 真实 API key 冒烟测试（用户验证）
@@ -187,7 +187,7 @@ cargo build --workspace            # 0 warning
    - .NET：动态库打进包（runtimes/{rid}/native/），NuGet `AIBridge`
 3. **Python 绑定补全**：在 `crates/aibridge-python/src/lib.rs` 的 `#[pymethods] impl Client` 补 `image_generate/video_create/video_poll/embed/transcribe/list_models/list_voices/recommend_voices`，参照已有 `chat`/`speech` 的模式（builder 构造 + RUNTIME.spawn + map_error）。
 4. **文档网站**：mkdocs 或 similar，整合设计文档 + 迁移指南 + 五语言 API。
-5. **v1 归档**：`main` 分支（Python v1）打 `v1.3.3` tag 后归档，README 指向 v2。
+5. **v1 归档（已完成）**：v1 代码（`agn/`）、v1 测试、v1 示例、根 `pyproject.toml`、`uv.lock`、`README_v1.md`、`docs/01~05` 已于 2026-08-30 移除，git tag `v1.3.3` 可随时找回。
 
 ### 7.4 关键约束（必须遵守）
 - **中文注释**（项目强制规则，文件模块文档字符串 + 公开项文档注释）

@@ -763,4 +763,4 @@ A: Yes. After v2 is officially released, the v1 repository will be archived and 
 - [Design](design.md): architecture, data models, FFI boundary, error handling
 - [Progress](PROGRESS.md): current implementation progress and handover guide
 - [README (v2)](index.md): five-language quick start + provider list
-- [Original README (v1)](https://github.com/WingkySky/AiBridge/blob/main/README_v1.md): Python v1 documentation (archived reference)
+- [Original README (v1)](https://github.com/WingkySky/AiBridge/blob/v1.3.3/README_v1.md): Python v1 documentation (git tag `v1.3.3` archived reference)
