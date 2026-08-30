@@ -23,16 +23,19 @@
 
 | 能力 | Core | Python 绑定 | Node 绑定 | FFI（Go/JVM/.NET）|
 |------|------|------------|-----------|-------------------|
-| chat / chat_stream | ✅ | ✅ | ✅ | ✅ chat / ✅ chat_stream / ❌ speech 以外能力 |
+| chat / chat_stream | ✅ | ✅ | ✅ | ✅ chat / ✅ chat_stream / ✅ speech |
 | image_generate | ✅ | ✅ | ❌ | ❌ |
 | video_create / video_poll | ✅ | ✅ | ❌ | ❌ |
 | embed | ✅ | ✅ | ❌ | ❌ |
 | transcribe | ✅ | ✅ | ❌ | ❌ |
 | speech | ✅ | ✅ | ✅ | ✅ |
 | list_models | ✅ | ✅ | ❌ | ❌ |
-| list_voices / recommend_voices | ✅（core 层） | ❌ **未暴露** | ❌ | ❌ |
+| list_voices / recommend_voices | ✅（core 层） | ✅（2026-08-30 e2e 验证） | ❌ | ❌ |
 | translate（语音翻译） | ⚠️ 只有 flag | ❌ | ❌ | ❌ |
-| Router（多 Provider 路由） | ✅（core 层完整） | ❌ **未暴露** | ❌ | ❌ |
+| Router（多 Provider 路由） | ✅（core 层完整） | ✅（2026-08-30 e2e 验证） | ❌ | ❌ |
+
+> 更新（2026-08-30）：Python 绑定已全能力暴露（六大能力 + translate + list_models/list_voices/recommend_voices + Router），
+> e2e 见 `tests/test_python_binding_full.py`。剩余差距集中在 Node / Go / JVM / .NET 四条绑定通道。
 
 ### Core 层已实现的高级特性
 - 工具调用（ToolDefinition / ToolCall / ToolChoice / parallel_tool_calls）

@@ -746,8 +746,8 @@ asyncio.run(main())
 
 ## 14. 常见问题
 
-**Q1：v2 Python 绑定为什么部分能力还没暴露？**
-A：v2 是 Rust 核心 + 五语言绑定架构。Rust 核心已全部实现 38 provider + 六大能力；Python 绑定（PyO3）已暴露 `chat/chat_stream/speech/image_generate/video_create/video_poll/embed/transcribe/list_models`，目前仅 `list_voices/recommend_voices/Router` 待后续版本暴露（全能力验证可参考 `examples/hello_python_full.py`）。
+**Q1：v2 Python 绑定能力暴露完整吗？**
+A：完整。Python 绑定（PyO3）已暴露全部能力：六大能力（`chat/chat_stream/image_generate/video_create/video_poll/embed/transcribe/speech`）+ `translate` + `list_models/list_voices/recommend_voices` + `Router`（五种路由策略 + Fallback）。全能力验证见 `examples/hello_python_full.py` 与 `tests/test_python_binding_full.py`。
 
 **Q2：迁移后性能会有提升吗？**
 A：是。Rust 核心无 GIL、原生 async、零成本抽象，IO 密集场景吞吐与延迟显著优于 Python。Python 绑定通过 PyO3 直连 Rust 核心（无 JSON 序列化边界），真实 IO 在 tokio worker 线程执行，不阻塞 asyncio 事件循环。

@@ -741,8 +741,8 @@ asyncio.run(main())
 
 ## 14. FAQ
 
-**Q1: Why are some capabilities not yet exposed in the v2 Python binding?**
-A: v2 is a Rust core + five-language bindings architecture. The Rust core already fully implements 38 providers + six major capabilities; the Python binding (PyO3) already exposes `chat/chat_stream/speech/image_generate/video_create/video_poll/embed/transcribe/list_models`, with only `list_voices/recommend_voices/Router` to be exposed in future releases (see `examples/hello_python_full.py` for a full-capability verification script).
+**Q1: Are all capabilities exposed in the v2 Python binding?**
+A: Yes. The Python binding (PyO3) exposes the full capability set: the six major capabilities (`chat/chat_stream/image_generate/video_create/video_poll/embed/transcribe/speech`) plus `translate`, `list_models/list_voices/recommend_voices`, and `Router` (five routing strategies + fallback). See `examples/hello_python_full.py` and `tests/test_python_binding_full.py` for full-capability verification.
 
 **Q2: Will performance improve after migration?**
 A: Yes. The Rust core has no GIL, native async, and zero-cost abstractions; in IO-intensive scenarios its throughput and latency are significantly better than Python. The Python binding connects directly to the Rust core via PyO3 (no JSON serialization boundary), and real IO executes on tokio worker threads without blocking the asyncio event loop.

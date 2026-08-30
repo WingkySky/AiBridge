@@ -13,10 +13,11 @@
 plugins {
     application
     java
+    `maven-publish`
 }
 
 group = "io.aibridge"
-version = "0.1.0"
+version = "2.1.0"
 
 java {
     toolchain {
@@ -114,5 +115,23 @@ tasks.jar {
     dependsOn("copyNativeLib")
     if (project.hasProperty("embedNative")) {
         archiveClassifier.set("$nativeOs-$nativeArch")
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Maven 发布配置（设计文档 12.1）
+//
+// 本地验证：./gradlew publishToMavenLocal（产物进 ~/.m2/repository/io/aibridge/aibridge/）
+// Maven Central 正式发布需签名 + OSSRH/中央门户凭据，凭据配置后由
+// .github/workflows/publish-bindings.yml 的发布 job 使用（当前以 GitHub Release 产物收尾）。
+// ──────────────────────────────────────────────────────────────────────────
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            groupId = "io.aibridge"
+            artifactId = "aibridge"
+            version = "2.1.0"
+            from(components["java"])
+        }
     }
 }

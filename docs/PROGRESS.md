@@ -117,12 +117,12 @@ aibridge/
 - [x] Python v1→v2 迁移指南（[docs/migration-guide.md](migration-guide.md)）
 - [x] v2 README（[README.md](index.md)）
 - [x] 进度文档更新（本文档）
-- [ ] CI 矩阵（平台 × 语言，交叉编译）
-- [ ] 五语言包发布（PyPI `aibridge` / npm `aibridge` / Maven `io.aibridge:aibridge` / NuGet `AIBridge` / Go module `aibridge-go`）
-- [ ] 文档网站
+- [x] CI 矩阵（ci.yml：4 平台 × 6 语言 job，2026-08-30 验证 workflow 就绪）
+- [x] 五语言包发布 workflow（publish-python.yml + publish-bindings.yml：Node npm / JVM jar / .NET NuGet / Go 动态库 Release；实际发布需配置 NPM_TOKEN / NUGET_API_KEY 等 secrets）
+- [x] 文档网站（mkdocs-material + en i18n，2026-08-30 本地 build 验证通过，部署由 docs.yml 自动执行）
 - [x] 旧版 v1 归档 + 打 v2.0.0 tag（2026-08-30：v1 代码/测试/文档已从仓库移除，git tag `v1.3.3` 可找回）
-- [ ] .NET hello world 验证（待 dotnet sdk）
-- [ ] 一致性测试纳入 CI（当前手动跑）
+- [x] .NET hello world 验证（2026-08-30 本地 dotnet 10.0.302 实测通过：chat/stream/speech 三项断言全 True）
+- [x] 一致性测试纳入 CI（consistency.yml：四语言错误探针 + 五语言 hello world，2026-08-30 确认 workflow 完整）
 - [ ] 真实 API key 冒烟测试（用户验证）
 
 ### ✅ 增量迭代：Agnes Video 2.5 / 2.5-Flash 双契约接入（2026-08-27 完成）
@@ -145,16 +145,17 @@ aibridge/
 
 - **aibridge-core**：1534 单测全通过（含 38 provider mock HTTP 测试 + 数据模型 + 错误 + 路由；2026-08-27 增加 Agnes Video 2.5 双契约 20+ 测试）
 - **aibridge-ffi**：39 单测全通过
-- **五语言 hello world**（echo adapter）：Python/Node/Go/JVM 跑通，.NET 代码就绪待 dotnet
-- **跨语言一致性测试**：tests/consistency/（四语言 chat/stream/speech/错误全一致）
+- **五语言 hello world**（echo adapter）：Python/Node/Go/JVM/.NET 全部跑通（.NET 2026-08-30 本地 dotnet 10 实测通过）
+- **跨语言一致性测试**：tests/consistency/（四语言 chat/stream/speech/错误全一致，已纳入 consistency.yml CI）
+- **Python 绑定 e2e**：tests/（视频统一参数 4 用例 + 全能力验证 5 用例：list_voices/recommend_voices/Router）
 
 ## 6. 遗留问题（非阻塞）
 
-1. **.NET hello world**：待装 dotnet sdk（`brew install --cask dotnet-sdk`，需 sudo），代码 + P/Invoke 已就绪
-2. **一致性测试纳入 CI**：当前手动跑，待接入 CI matrix
+1. **.NET 绑定 FFI 能力补齐**：Rust 核心已实现六大能力；.NET/Node/Go/JVM 绑定目前暴露 `chat/chat_stream/speech`，`image/video/embed/transcribe/list_models/list_voices` 待增量补齐（Python 绑定已全能力暴露并 e2e 验证）
+2. **一致性测试 CI 首跑验证**：consistency.yml 已就绪，待 push 后确认 GitHub Actions 实际通过
 3. **真实 IO 流式验证**：Python/Node 流式重构已完成（不阻塞推理），但真实 API key 验证待用户
-4. **dylib 分发**：Go/JVM/.NET 依赖 libaibridge，JVM/.NET 打进包，Go 提供安装脚本（阶段 3 处理）
-5. **Python 绑定能力暴露**：Rust 核心已全部实现 38 provider + 六大能力；Python 绑定（PyO3）已暴露 `chat/chat_stream/speech/image_generate/video_create/video_poll/embed/transcribe/list_models`（见 `examples/hello_python_full.py` 全能力验证），仅 `list_voices/recommend_voices/Router` 待后续版本暴露
+4. **dylib 分发**：Go/JVM/.NET 依赖 libaibridge，JVM/.NET 打进包，Go 提供安装脚本（publish-bindings.yml 已覆盖产物分发）
+5. **Python 绑定能力暴露（已完成）**：六大能力 + `translate/list_models/list_voices/recommend_voices/Router` 全部暴露（见 `examples/hello_python_full.py` 与 `tests/test_python_binding_full.py`）
 
 ## 7. 新 agent 接手指南
 
@@ -185,7 +186,7 @@ cargo build --workspace            # 0 warning
    - Go：提供 libaibridge 安装脚本，Go module `aibridge-go`
    - JVM：动态库打进 jar（按平台 classifier），Maven `io.aibridge:aibridge`
    - .NET：动态库打进包（runtimes/{rid}/native/），NuGet `AIBridge`
-3. **Python 绑定补全（剩余部分）**：在 `crates/aibridge-python/src/lib.rs` 的 `#[pymethods] impl Client` 补 `list_voices/recommend_voices` 与 Router 暴露（image/video/embed/transcribe/list_models 已完成），参照已有方法模式（builder 构造 + RUNTIME.spawn + map_error）。
+3. **Python 绑定补全（已完成）**：`list_voices/recommend_voices/Router` 已暴露并 e2e 验证（`tests/test_python_binding_full.py`）；剩余增量工作见遗留问题 #1（其他四语言绑定能力补齐）。
 4. **文档网站**：mkdocs 或 similar，整合设计文档 + 迁移指南 + 五语言 API。
 5. **v1 归档（已完成）**：v1 代码（`agn/`）、v1 测试、v1 示例、根 `pyproject.toml`、`uv.lock`、`README_v1.md`、`docs/01~05` 已于 2026-08-30 移除，git tag `v1.3.3` 可随时找回。
 

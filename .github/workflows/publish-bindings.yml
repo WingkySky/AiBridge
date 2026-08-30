@@ -1,0 +1,370 @@
+# AIBridge 五语言绑定发布（Node/npm · JVM jar · .NET/NuGet · Go 动态库）
+#
+# 触发：
+# - 推送 v* tag（如 v2.1.1）：构建全部平台产物并上传 GitHub Release；
+#   配置了对应 secrets 时同步发布 npm / NuGet。
+# - 手动触发（workflow_dispatch）：默认 dry_run=true，仅构建 + 上传 artifact，不发布。
+#
+# 分工说明：
+# - Python 发布走独立 workflow（publish-python.yml，含 PyPI 信任发布）
+# - Maven Central 正式发布需签名 + 中央门户凭据，本 workflow 先以 GitHub Release
+#   产物收尾（jvm-build 产出带平台 classifier 的 jar）；凭据配置后可增加 publish job
+# - Go module 无中央仓库：go get 通过 git tag 拉取源码，go-release job 负责
+#   把各平台 libaibridge 动态库作为 Release 附件发布（配合安装脚本使用）
+#
+# 发布凭据（Secrets，可选）：
+# - NPM_TOKEN：npm `aibridge` 包（crates/aibridge-node）
+# - NUGET_API_KEY：NuGet `AIBridge` 包（bindings/dotnet）
+
+name: Publish Bindings
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "仅构建不发布（true/false）"
+        default: "true"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 3
+
+# 真实发布条件在各个发布步骤的 if 中统一表达：
+#   tag 推送 +（非手动触发 或 dry_run=false）+ 对应 secrets 已配置
+# ────────────────────────────────────────────────────────────────────────────
+# 1. Node：napi 多平台构建 → npm publish
+# ────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  node-build:
+    name: Node .node (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            label: linux-x64
+          - os: ubuntu-24.04-arm
+            triple: aarch64-unknown-linux-gnu
+            label: linux-arm64
+          - os: macos-latest
+            triple: aarch64-apple-darwin
+            label: macos-arm64
+          - os: macos-latest
+            triple: x86_64-apple-darwin
+            label: macos-x64
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            label: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: crates/aibridge-node/package-lock.json
+      - name: npm install
+        run: npm install
+        working-directory: crates/aibridge-node
+      - name: napi build（release，指定 triple）
+        run: npx napi build --platform --release --target ${{ matrix.triple }}
+        working-directory: crates/aibridge-node
+      - name: 上传 .node 产物（napi 官方命名 bindings-{triple}，prepublish 依赖）
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.triple }}
+          path: crates/aibridge-node/*.node
+          if-no-files-found: error
+
+  node-publish:
+    name: Node 发布到 npm
+    needs: node-build
+    runs-on: ubuntu-latest
+    env:
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Node（npm registry 认证上下文）
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - name: 安装 @napi-rs/cli
+        run: npm install
+        working-directory: crates/aibridge-node
+      - name: 下载各平台 .node
+        uses: actions/download-artifact@v4
+        with:
+          path: crates/aibridge-node/artifacts
+      - name: 检查发布条件
+        run: |
+          echo "tag 推送：${{ startsWith(github.ref, 'refs/tags/v') }}"
+          echo "dry_run：${{ inputs.dry_run }}"
+          echo "NPM_TOKEN 已配置：$HAS_NPM_TOKEN"
+      - name: npm publish（prepublish 组装平台子包后发布）
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') &&
+          (github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false') &&
+          env.HAS_NPM_TOKEN == 'true'
+        working-directory: crates/aibridge-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npx napi prepublish -t npm
+          npm publish --access public
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. JVM：三平台构建（动态库打进 jar，平台 classifier）→ Release 产物
+  # ──────────────────────────────────────────────────────────────────────────
+  jvm-build:
+    name: JVM jar (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 安装 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: 构建 libaibridge (release)
+        run: cargo build -p aibridge-ffi --release
+      - name: gradle build（native 进 jar，平台 classifier）
+        run: |
+          cd bindings/jvm
+          ./gradlew build -PembedNative=true
+      - name: 上传 jar 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: jvm-${{ matrix.os }}
+          path: bindings/jvm/build/libs/*.jar
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. .NET：多平台动态库构建 → 汇总组包 → NuGet push
+  #    NuGet 包内含全部平台 runtimes/{rid}/native/，由汇总 job 统一组包
+  # ──────────────────────────────────────────────────────────────────────────
+  dotnet-build:
+    name: .NET 动态库 (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            lib: libaibridge.so
+            label: linux-x64
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+            lib: libaibridge.so
+            label: linux-arm64
+          - os: macos-latest
+            rid: osx-arm64
+            lib: libaibridge.dylib
+            label: macos-arm64
+          - os: macos-latest
+            rid: osx-x64
+            lib: libaibridge.dylib
+            triple: x86_64-apple-darwin
+            label: macos-x64
+          - os: windows-latest
+            rid: win-x64
+            lib: aibridge.dll
+            label: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple || '' }}
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 libaibridge (release，交叉编译时指定 target)
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cargo build -p aibridge-ffi --release --target ${{ matrix.triple }}
+          else
+            cargo build -p aibridge-ffi --release
+          fi
+      - name: 整理动态库命名（区分平台）
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cp "target/${{ matrix.triple }}/release/${{ matrix.lib }}" "./${{ matrix.rid }}-${{ matrix.lib }}"
+          else
+            cp "target/release/${{ matrix.lib }}" "./${{ matrix.rid }}-${{ matrix.lib }}"
+          fi
+      - name: 上传动态库
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-${{ matrix.rid }}
+          path: ./${{ matrix.rid }}-${{ matrix.lib }}
+          if-no-files-found: error
+
+  dotnet-publish:
+    name: .NET 组包与发布
+    needs: dotnet-build
+    runs-on: ubuntu-latest
+    env:
+      HAS_NUGET_KEY: ${{ secrets.NUGET_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: 下载各平台动态库
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 组装 runtimes/{rid}/native/
+        run: |
+          # 各 rid 对应的动态库文件名
+          lib_for_rid() {
+            case "$1" in
+              win-x64) echo "aibridge.dll" ;;
+              osx-arm64 | osx-x64) echo "libaibridge.dylib" ;;
+              *) echo "libaibridge.so" ;;
+            esac
+          }
+          for rid in linux-x64 linux-arm64 osx-arm64 osx-x64 win-x64; do
+            LIB="$(lib_for_rid "$rid")"
+            mkdir -p "bindings/dotnet/AIBridge/runtimes/$rid/native"
+            if [ -f "artifacts/dotnet-$rid/$rid-$LIB" ]; then
+              cp "artifacts/dotnet-$rid/$rid-$LIB" "bindings/dotnet/AIBridge/runtimes/$rid/native/$LIB"
+              echo "已放置 $rid/$LIB"
+            else
+              echo "警告：缺少 $rid 动态库" >&2
+            fi
+          done
+          find bindings/dotnet/AIBridge/runtimes -type f
+      - name: dotnet pack（Release）
+        run: |
+          cd bindings/dotnet/AIBridge
+          dotnet pack -c Release
+      - name: 上传 nupkg 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: bindings/dotnet/AIBridge/bin/Release/*.nupkg
+          if-no-files-found: error
+      - name: NuGet push
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') &&
+          (github.event_name != 'workflow_dispatch' || inputs.dry_run == 'false') &&
+          env.HAS_NUGET_KEY == 'true'
+        run: |
+          dotnet nuget push "bindings/dotnet/AIBridge/bin/Release/*.nupkg" \
+            --api-key "${{ secrets.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Go：多平台动态库构建 → GitHub Release 附件（go get 拉源码，动态库另行分发）
+  # ──────────────────────────────────────────────────────────────────────────
+  go-build:
+    name: Go 动态库 (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+            lib: libaibridge.so
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+            lib: libaibridge.so
+          - os: macos-latest
+            rid: osx-arm64
+            lib: libaibridge.dylib
+          - os: macos-latest
+            rid: osx-x64
+            lib: libaibridge.dylib
+            triple: x86_64-apple-darwin
+          - os: windows-latest
+            rid: win-x64
+            lib: aibridge.dll
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple || '' }}
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+      - name: 构建 libaibridge (release)
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cargo build -p aibridge-ffi --release --target ${{ matrix.triple }}
+          else
+            cargo build -p aibridge-ffi --release
+          fi
+      - name: 整理命名（libaibridge-{rid}）
+        shell: bash
+        run: |
+          if [ -n "${{ matrix.triple }}" ]; then
+            cp "target/${{ matrix.triple }}/release/${{ matrix.lib }}" "libaibridge-${{ matrix.rid }}${{ matrix.lib }}"
+          else
+            cp "target/release/${{ matrix.lib }}" "libaibridge-${{ matrix.rid }}${{ matrix.lib }}"
+          fi
+      - name: 上传动态库
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-${{ matrix.rid }}
+          path: libaibridge-${{ matrix.rid }}*
+          if-no-files-found: error
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. GitHub Release 汇总（仅 tag 推送时）：jar / nupkg / 动态库 作为附件
+  # ──────────────────────────────────────────────────────────────────────────
+  github-release:
+    name: GitHub Release
+    needs: [node-build, jvm-build, dotnet-build, go-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: 下载全部产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: 整理 Release 附件
+        run: |
+          mkdir -p release-assets
+          # JVM jar（平台 classifier）
+          find artifacts/jvm-* -name '*.jar' -exec cp {} release-assets/ \;
+          # NuGet 包
+          find artifacts/nuget-package -name '*.nupkg' -exec cp {} release-assets/ \;
+          # Go 动态库
+          find artifacts/go-* -name 'libaibridge-*' -exec cp {} release-assets/ \;
+          ls -lh release-assets
+      - name: 创建 GitHub Release 并上传附件
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true

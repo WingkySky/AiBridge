@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+**阶段 3 发布收尾（2026-08-30）：**
+- 五语言绑定发布 workflow：新增 `.github/workflows/publish-bindings.yml`（Node npm 多平台 napi 构建 + npm publish、JVM jar 平台 classifier、.NET NuGet 组包 + nuget push、Go 动态库 GitHub Release 附件；tag 触发，支持 dry_run）
+- JVM 绑定 `build.gradle.kts` 新增 `maven-publish` 配置（`io.aibridge:aibridge:2.1.0`，支持 `publishToMavenLocal` 验证）
+- Python 绑定 e2e：新增 `tests/test_python_binding_full.py`（5 用例：list_voices / recommend_voices / Router 路由 chat）
+- 仓库新增 `pytest.ini`（v1 归档后承接 pytest 配置）
+
+### Changed
+
+- 版本对齐：Node `package.json` 2.0.0-alpha.1 → 2.1.0；JVM `build.gradle.kts` 0.1.0 → 2.1.0；.NET csproj `PackageVersion` 2.0.0 → 2.1.0
+- `.env.example` 的 `AGNES_BASE_URL` 修正为统一域名 `https://apihub.agnes-ai.com/v1`（旧域名已废弃）
+
+### Removed
+
+- Python v1 归档移除：`agn/` 包、v1 pytest 测试、v1 示例、根 `pyproject.toml`、`uv.lock`、`README_v1.md`、`docs/01~05`（完整代码见 git tag `v1.3.3`）
+
+### Verified
+
+- .NET hello world 本地实测通过（dotnet 10，chat/stream/speech 三项断言全 True）
+- mkdocs 文档网站本地构建通过（含 en i18n）
+- consistency.yml / ci.yml / publish workflow 就绪性人工复核通过
+
 ## [2.1.0] - 2026-08-27
 
 ### Added
